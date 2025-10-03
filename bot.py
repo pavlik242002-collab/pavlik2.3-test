@@ -125,6 +125,7 @@ def init_db(conn):
                         id SERIAL PRIMARY KEY,
                         user_id BIGINT NOT NULL,
                         request_text TEXT NOT NULL,
+                        response_text TEXT,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -523,6 +524,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE  # Добавляем global для доступа к глобальной переменной
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Только администраторы могут добавлять факты.",
@@ -549,6 +551,7 @@ async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Только администраторы могут удалять факты.",
                                         reply_markup=ReplyKeyboardRemove())
         return
+    global KNOWLEDGE_BASE
     if not KNOWLEDGE_BASE:
         await update.message.reply_text("База знаний пуста.", reply_markup=ReplyKeyboardRemove())
         return
@@ -681,7 +684,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE  # Явно указываем, что используем глобальную переменную
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     chat_id: int = update.effective_chat.id
     user_input: str = update.message.text.strip()
