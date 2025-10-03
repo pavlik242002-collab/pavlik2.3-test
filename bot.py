@@ -142,7 +142,7 @@ def init_db(conn):
                     logger.info("Добавлен столбец request_text в таблицу request_logs.")
                 logger.info("Таблица request_logs уже существует.")
 
-            # Новая таблица knowledge_base для фактов (доступна всем, добавление только админам)
+            # Таблица knowledge_base для фактов
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -158,7 +158,7 @@ def init_db(conn):
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
-                # Добавляем начальные факты, если их нет
+                # Добавляем начальные факты
                 initial_facts = [
                     ("Привет! Чем могу помочь?", 6909708460),
                     ("Документы по награждениям находятся в папке /documents/Награждения.", 6909708460),
@@ -311,13 +311,13 @@ def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
         logger.error(f"Ошибка при сохранении user_profiles: {str(e)}")
         conn.rollback()
 
-# Функции для работы с базой знаний в Postgres (доступна всем, добавление только админам)
-def load_knowledge_base() -> List[str]:
+# Функции для работы с базой знаний в Postgres
+def load_knowledge_base() -> List[Dict[str, Any]]:
     """Загружает все факты из таблицы knowledge_base (доступно всем пользователям)."""
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT fact_text FROM knowledge_base ORDER BY timestamp DESC")
-            facts = [row[0] for row in cur.fetchall()]
+            cur.execute("SELECT id, fact_text FROM knowledge_base ORDER BY timestamp DESC")
+            facts = [{"id": row[0], "text": row[1]} for row in cur.fetchall()]
             logger.info(f"Загружено {len(facts)} фактов из таблицы knowledge_base")
             return facts
     except Exception as e:
@@ -338,6 +338,23 @@ def save_knowledge_fact(fact: str, added_by: int) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении факта в knowledge_base: {str(e)}")
         conn.rollback()
+
+def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
+    """Удаляет факт из таблицы knowledge_base по ID (только для админов)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM knowledge_base WHERE id = %s", (fact_id,))
+            if cur.rowcount > 0:
+                conn.commit()
+                logger.info(f"Факт с ID {fact_id} удален администратором {admin_id}")
+                return True
+            else:
+                logger.warning(f"Факт с ID {fact_id} не найден для удаления администратором {admin_id}")
+                return False
+    except Exception as e:
+        logger.error(f"Ошибка при удалении факта с ID {fact_id}: {str(e)}")
+        conn.rollback()
+        return False
 
 # Функция для извлечения ключевого слова из запроса
 def extract_keyword(user_input: str) -> str:
@@ -475,12 +492,12 @@ def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str)
 ALLOWED_ADMINS = load_allowed_admins()
 ALLOWED_USERS = load_allowed_users()
 USER_PROFILES = load_user_profiles()
-KNOWLEDGE_BASE = load_knowledge_base()  # Загружаем факты из Postgres (доступно всем)
+KNOWLEDGE_BASE = load_knowledge_base()  # Загружаем факты из Postgres
 
 # Системный промпт для ИИ
 system_prompt = """
 Вы — полезный чат-бот, который логически анализирует историю переписки. 
-Сначала проверяй базу знаний из knowledge_base.json. Если ответа нет, используй свои знания.
+Сначала проверяй базу знаний из таблицы knowledge_base. Если ответа нет, используй свои знания.
 Отвечай кратко, на русском языке, без лишних объяснений.
 """
 
@@ -518,14 +535,33 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     fact = ' '.join(args).strip()
     global KNOWLEDGE_BASE
-    if fact not in KNOWLEDGE_BASE:
+    if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
-        KNOWLEDGE_BASE.append(fact)  # Обновляем кэш в памяти
+        KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
         await update.message.reply_text(f"Факт '{fact}' добавлен в базу знаний.", reply_markup=ReplyKeyboardRemove())
         logger.info(f"Факт '{fact}' добавлен администратором {user_id} в knowledge_base")
     else:
         await update.message.reply_text(f"Факт '{fact}' уже существует в базе знаний.",
                                         reply_markup=ReplyKeyboardRemove())
+
+# Команда /delete_fact для удаления фактов (только для админов)
+async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id: int = update.effective_user.id
+    if user_id not in ALLOWED_ADMINS:
+        await update.message.reply_text("Только администраторы могут удалять факты.",
+                                        reply_markup=ReplyKeyboardRemove())
+        return
+    global KNOWLEDGE_BASE
+    if not KNOWLEDGE_BASE:
+        await update.message.reply_text("База знаний пуста.", reply_markup=ReplyKeyboardRemove())
+        return
+    facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+    context.user_data["awaiting_fact_id"] = True
+    await update.message.reply_text(
+        f"Выберите ID факта для удаления:\n{facts_list}\n\nВведите ID:",
+        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
+    )
+    logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты:\n{facts_list}")
 
 # Отображение главного меню
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -545,6 +581,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('awaiting_user_id', None)
     context.user_data.pop('awaiting_admin_id', None)
     context.user_data.pop('awaiting_upload', None)
+    context.user_data.pop('awaiting_fact_id', None)
     await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
 # Отображение меню управления пользователями
@@ -552,7 +589,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = [
         ['Добавить пользователя', 'Добавить администратора'],
         ['Список пользователей', 'Список администраторов'],
-        ['Удалить файл'],
+        ['Удалить файл', 'Удалить факт'],
         ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -682,6 +719,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ]
     default_reply_markup = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = default_reply_markup
+
+    if context.user_data.get("awaiting_fact_id", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text("Только администраторы могут удалять факты.",
+                                            reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_fact_id", None)
+            return
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_fact_id", None)
+            await show_main_menu(update, context)
+            return
+        try:
+            fact_id = int(user_input)
+            global KNOWLEDGE_BASE
+            if delete_knowledge_fact(fact_id, user_id):
+                KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
+                await update.message.reply_text(f"Факт с ID {fact_id} удалён.", reply_markup=default_reply_markup)
+            else:
+                await update.message.reply_text(f"Факт с ID {fact_id} не найден.", reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_fact_id", None)
+        except ValueError:
+            await update.message.reply_text("Введите корректный ID факта (число).",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
 
     if context.user_data.get("awaiting_user_id", False):
         try:
@@ -841,6 +902,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_file_list(update, context, for_deletion=True)
         handled = True
 
+    elif user_input == "Удалить факт":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text("Только администраторы могут удалять факты.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data.pop('awaiting_upload', None)
+        await delete_fact(update, context)
+        handled = True
+
     elif user_input == "Загрузить файл":
         profile = USER_PROFILES.get(user_id)
         if not profile or "region" not in profile:
@@ -859,6 +929,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     elif user_input == "Назад":
         context.user_data.pop('awaiting_upload', None)
+        context.user_data.pop('awaiting_fact_id', None)
         await show_main_menu(update, context)
         handled = True
 
@@ -885,27 +956,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Проверка фактов из knowledge_base (Postgres) для всех пользователей
     if not handled:
-        global KNOWLEDGE_BASE  # Используем кэш из Postgres
+        global KNOWLEDGE_BASE
         keyword = extract_keyword(user_input)
         logger.info(
             f"Поиск в knowledge_base (Postgres) для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
 
         if keyword:
             keyword_lower = keyword.lower().strip()
-            for fact in KNOWLEDGE_BASE:
-                fact_lower = fact.lower().strip()
-                if fact_lower.startswith(keyword_lower) or keyword_lower in fact_lower:
-                    await update.message.reply_text(fact, reply_markup=default_reply_markup)
-                    log_request(user_id, user_input, fact)
-                    logger.info(
-                        f"Ответ найден в knowledge_base (Postgres) для запроса '{user_input}' (ключевое слово: '{keyword}'): {fact}")
-                    return
-                else:
-                    logger.debug(f"Факт '{fact}' не соответствует ключевому слову '{keyword_lower}'")
+            matching_facts = [fact['text'] for fact in KNOWLEDGE_BASE if keyword_lower in fact['text'].lower()]
+            if matching_facts:
+                response = "\n".join(matching_facts)
+                await update.message.reply_text(response, reply_markup=default_reply_markup)
+                log_request(user_id, user_input, response)
+                logger.info(
+                    f"Найдено {len(matching_facts)} фактов в knowledge_base для запроса '{user_input}' (ключевое слово: '{keyword}'): {response}")
+                return
+            else:
+                logger.debug(f"Факты для ключевого слова '{keyword_lower}' не найдены")
         else:
             logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
 
-        # Если факт не найден, обращаемся к Grok API
+        # Если факты не найдены, обращаемся к Grok API
         logger.info(f"Факт для '{user_input}' не найден в knowledge_base, обращение к Grok API")
         if chat_id not in histories:
             histories[chat_id] = {"name": USER_PROFILES[user_id]["name"],
@@ -1007,6 +1078,7 @@ def main():
         app = Application.builder().token(TELEGRAM_TOKEN).build()
         app.add_handler(CommandHandler("start", send_welcome))
         app.add_handler(CommandHandler("add_fact", add_fact))
+        app.add_handler(CommandHandler("delete_fact", delete_fact))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         app.add_handler(CallbackQueryHandler(handle_callback_query))
