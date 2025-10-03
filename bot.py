@@ -533,8 +533,8 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not args:
         await update.message.reply_text("Использование: /add_fact <факт>", reply_markup=ReplyKeyboardRemove())
         return
-    global KNOWLEDGE_BASE
     fact = ' '.join(args).strip()
+    global KNOWLEDGE_BASE
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
         KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
