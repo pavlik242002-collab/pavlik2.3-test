@@ -160,6 +160,7 @@ def init_db(conn):
                 """)
                 # Добавляем начальные факты
                 initial_facts = [
+
                     ("ВСКС - Всероссийский студенческий корпус спасателей", 6909708460)
                 ]
                 for fact, admin_id in initial_facts:
