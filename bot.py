@@ -160,7 +160,9 @@ def init_db(conn):
                 """)
                 # Добавляем начальные факты
                 initial_facts = [
-
+                    ("Привет! Чем могу помочь?", 6909708460),
+                    ("Документы по награждениям находятся в папке /documents/Награждения.", 6909708460),
+                    ("Всё отлично, спасибо за вопрос!", 6909708460),
                     ("ВСКС - Всероссийский студенческий корпус спасателей", 6909708460)
                 ]
                 for fact, admin_id in initial_facts:
@@ -531,8 +533,8 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not args:
         await update.message.reply_text("Использование: /add_fact <факт>", reply_markup=ReplyKeyboardRemove())
         return
-    fact = ' '.join(args).strip()
     global KNOWLEDGE_BASE
+    fact = ' '.join(args).strip()
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
         KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
