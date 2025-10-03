@@ -4,7 +4,6 @@ import os
 import logging
 import requests
 import json
-import re
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, Update
@@ -13,7 +12,7 @@ from telegram import InputFile
 from urllib.parse import quote
 from openai import OpenAI
 import psycopg2
-from fuzzywuzzy import fuzz
+from duckduckgo_search import DDGS
 
 # Настройка логирования
 logging.basicConfig(
@@ -127,15 +126,6 @@ def init_db(conn):
                 """)
                 logger.info("Таблица request_logs создана.")
             else:
-                cur.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.columns 
-                        WHERE table_name = 'request_logs' AND column_name = 'request_text'
-                    );
-                """)
-                if not cur.fetchone()[0]:
-                    cur.execute("ALTER TABLE request_logs ADD COLUMN request_text TEXT NOT NULL;")
-                    logger.info("Добавлен столбец request_text в таблицу request_logs.")
                 logger.info("Таблица request_logs уже существует.")
 
             cur.execute("""
@@ -359,54 +349,33 @@ def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
         conn.rollback()
         return False
 
-# Функция для форматирования факта
-def format_fact(fact: str, knowledge_base: List[Dict[str, Any]]) -> str:
-    match = re.match(r'^(.*?)\s*-\s*(.*)$', fact.strip())
-    if match:
-        name, role = match.groups()
-        name = name.strip()
-        role = role.strip()
-        for kb_fact in knowledge_base:
-            abbreviation_match = re.match(r'^(\w+)\s*-\s*(.*)$', kb_fact['text'])
-            if abbreviation_match:
-                abbr, full_name = abbreviation_match.groups()
-                if abbr.lower() in role.lower():
-                    role = role.replace(abbr, f"{full_name} ({abbr})")
-                    break
-        return f"{name} — {role.lower()[0].upper() + role.lower()[1:]}."
-    return fact
-
-# Функция для извлечения ключевого слова из запроса
-def extract_keyword(user_input: str) -> str:
-    user_input_lower = user_input.lower().strip()
-    patterns = [
-        r'^\s*(что\s+такое|что\s+значит|что)\s+(.+?)\s*$',
-        r'^\s*(кто\s+такой|кто)\s+(.+?)\s*$',
-        r'^\s*(.+?)\s*$'
-    ]
-    for pattern in patterns:
-        match = re.match(pattern, user_input_lower)
-        if match:
-            keyword = match.group(2) if len(match.groups()) > 1 else match.group(1)
-            keyword = keyword.strip('?').strip()
-            logger.debug(f"Извлечено ключевое слово: '{keyword}' из запроса '{user_input}'")
-            return keyword
-    logger.debug(f"Не удалось извлечь ключевое слово из запроса '{user_input}'")
-    return user_input_lower
-
-# Функция для логирования запросов
-def log_request(user_id: int, request: str, response: str) -> None:
+# Функция для веб-поиска
+def web_search(query: str) -> str:
+    cache_file = 'search_cache.json'
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO request_logs (user_id, request_text, response_text, timestamp) VALUES (%s, %s, %s, NOW())",
-                (user_id, request, response)
-            )
-            conn.commit()
-            logger.info(f"Запрос от {user_id} залогирован")
+        if not os.path.exists(cache_file):
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump({}, f, ensure_ascii=False)
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            cache = json.load(f)
     except Exception as e:
-        logger.error(f"Ошибка при логировании запроса: {str(e)}")
-        conn.rollback()
+        logger.error(f"Ошибка при загрузке search_cache.json: {str(e)}")
+        cache = {}
+    if query in cache:
+        logger.info(f"Использую кэш для запроса: {query}")
+        return cache[query]
+    try:
+        with DDGS() as ddgs:
+            results = [r for r in ddgs.text(query, max_results=3)]
+        search_results = json.dumps(results, ensure_ascii=False, indent=2)
+        cache[query] = search_results
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+        logger.info(f"Поиск выполнен для запроса: {query}")
+        return search_results
+    except Exception as e:
+        logger.error(f"Ошибка при поиске: {str(e)}")
+        return json.dumps({"error": "Не удалось выполнить поиск."}, ensure_ascii=False)
 
 # Функции для работы с Яндекс.Диском
 def create_yandex_folder(folder_path: str) -> bool:
@@ -515,16 +484,14 @@ USER_PROFILES = load_user_profiles()
 KNOWLEDGE_BASE = load_knowledge_base()
 
 # Системный промпт для ИИ
-def get_system_prompt(user_name: str) -> str:
-    return f"""
-Вы — дружелюбный чат-бот, отвечающий на русском языке. Ваше имя — Павлик.
-Обращайтесь к пользователю по имени ({user_name}), начиная ответ с обращения.
-Сначала проверяйте базу знаний из таблицы knowledge_base. Если в базе есть подходящий факт, используйте только его, отформатированный в естественном виде.
-Для запроса "Что такое ВСКС?" возвращайте только основной факт, начинающийся с "ВСКС - Всероссийский студенческий корпус спасателей...".
-Для других запросов используйте нечёткий поиск для выбора наиболее релевантного факта.
-Если факта нет, отвечайте кратко, в дружелюбном тоне, используя свои знания.
-Для неформальных сообщений (например, "привет") отвечайте дружелюбно, без лишней информации.
-Не добавляйте имя пользователя в текст запроса к API, используйте только текст сообщения пользователя.
+system_prompt = """
+Вы — полезный чат-бот, который логически анализирует всю историю переписки, чтобы давать последовательные ответы.
+Обязательно используй актуальные данные из поиска в истории сообщений для ответов на вопросы о фактах, организациях или событиях.
+Если данные из поиска доступны, основывайся только на них и отвечай подробно, но кратко.
+Если данных нет, используй свои знания и базу знаний, предоставленную системой.
+Не упоминай процесс поиска, источники или фразы вроде "не знаю" или "уточните".
+Всегда учитывай полный контекст разговора.
+Отвечай кратко, по делу, на русском языке, без лишних объяснений.
 """
 
 # Сохранение истории переписки
@@ -552,6 +519,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
@@ -566,7 +534,6 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     fact = ' '.join(args).strip()
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
-        global KNOWLEDGE_BASE
         KNOWLEDGE_BASE = load_knowledge_base()
         await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
                                         reply_markup=ReplyKeyboardRemove())
@@ -577,13 +544,13 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Команда /delete_fact для удаления фактов (только для админов)
 async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
         await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
                                         reply_markup=ReplyKeyboardRemove())
         return
-    global KNOWLEDGE_BASE
     if not KNOWLEDGE_BASE:
         await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardRemove())
         return
@@ -719,9 +686,22 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                                           reply_markup=default_reply_markup)
             logger.error(f"Ошибка при отправке файла: {str(e)}")
 
+# Функция для логирования запросов
+def log_request(user_id: int, request: str, response: str) -> None:
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO request_logs (user_id, request_text, response_text, timestamp) VALUES (%s, %s, %s, NOW())",
+                (user_id, request, response)
+            )
+            conn.commit()
+            logger.info(f"Запрос от {user_id} залогирован")
+    except Exception as e:
+        logger.error(f"Ошибка при логировании запроса: {str(e)}")
+        conn.rollback()
+
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     chat_id: int = update.effective_chat.id
     user_input: str = update.message.text.strip()
@@ -772,6 +752,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             fact_id = int(user_input)
             if delete_knowledge_fact(fact_id, user_id):
+                global KNOWLEDGE_BASE
                 KNOWLEDGE_BASE = load_knowledge_base()
                 await update.message.reply_text(f"{user_name}, факт с ID {fact_id} удалён.", reply_markup=default_reply_markup)
             else:
@@ -993,81 +974,90 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context, is_return=True)
             handled = True
 
-    # Проверка фактов из knowledge_base с улучшенным нечётким поиском
+    # Если сообщение не было обработано как специальная команда или состояние, обрабатываем как запрос к AI
     if not handled:
-        keyword = extract_keyword(user_input)
-        logger.info(
-            f"Поиск в knowledge_base для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
-
-        if keyword:
-            keyword_lower = keyword.lower().strip()
-            # Проверка точного совпадения запроса "Что такое ВСКС?"
-            if user_input.lower() == "что такое вскс?":
-                for fact in KNOWLEDGE_BASE:
-                    if fact['text'].startswith("ВСКС - Всероссийский студенческий корпус спасателей"):
-                        formatted_fact = format_fact(fact['text'], KNOWLEDGE_BASE)
-                        response = f"{user_name}, {formatted_fact}"
-                        await update.message.reply_text(response, reply_markup=default_reply_markup)
-                        log_request(user_id, user_input, response)
-                        logger.info(f"Найден основной факт ВСКС: '{fact['text']}' для запроса '{user_input}'")
-                        return
-            # Ищем наиболее релевантный факт с использованием fuzzywuzzy
-            best_fact = None
-            best_score = 0
-            for fact in KNOWLEDGE_BASE:
-                fact_text_lower = fact['text'].lower()
-                score = fuzz.token_set_ratio(keyword_lower, fact_text_lower)
-                if score >= 80 and score > best_score:
-                    best_score = score
-                    best_fact = fact['text']
-                    logger.debug(f"Факт '{fact['text']}' имеет score: {score} для запроса '{keyword_lower}'")
-
-            if best_fact:
-                formatted_fact = format_fact(best_fact, KNOWLEDGE_BASE)
-                response = f"{user_name}, {formatted_fact}"
-                await update.message.reply_text(response, reply_markup=default_reply_markup)
-                log_request(user_id, user_input, response)
-                logger.info(f"Найден факт: '{best_fact}' для запроса '{user_input}' (score: {best_score})")
-                return
-            else:
-                logger.debug(f"Факты для ключевого слова '{keyword_lower}' не найдены")
-        else:
-            logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
-
-        # Если факт не найден, обращаемся к Grok API
-        logger.info(f"Факт для '{user_input}' не найден в knowledge_base, обращение к Grok API")
+        # Обработка текстового сообщения через API
         if chat_id not in histories:
-            facts_text = "\n".join([f"- {fact['text']}" for fact in KNOWLEDGE_BASE]) or "База знаний пуста."
-            full_system_prompt = f"{get_system_prompt(user_name)}\n\nФакты из базы знаний:\n{facts_text}"
-            histories[chat_id] = {"name": user_name, "messages": [{"role": "system", "content": full_system_prompt}]}
+            histories[chat_id] = {"name": None, "messages": [{"role": "system", "content": system_prompt}]}
+
+        # Добавляем базу знаний в контекст для всех пользователей
+        global KNOWLEDGE_BASE
+        if KNOWLEDGE_BASE:
+            knowledge_text = "Известные факты для использования в ответах: " + "; ".join([fact['text'] for fact in KNOWLEDGE_BASE])
+            histories[chat_id]["messages"].insert(1, {"role": "system", "content": knowledge_text})
+            logger.info(f"Добавлены знания в контекст для user_id {user_id}: {len(KNOWLEDGE_BASE)} фактов")
+
+        # Проверка необходимости веб-поиска
+        need_search = any(word in user_input.lower() for word in [
+            "актуальная информация", "последние новости", "найди в интернете", "поиск",
+            "что такое", "информация о", "расскажи о", "найди", "поиск по", "детали о",
+            "вскс", "спасатели", "корпус спасателей"
+        ])
+
+        if need_search:
+            logger.info(f"Выполняется поиск для запроса: {user_input}")
+            search_results_json = web_search(user_input)
+            try:
+                results = json.loads(search_results_json)
+                if isinstance(results, list):
+                    extracted_text = "\n".join(
+                        [f"Источник: {r.get('title', '')}\n{r.get('body', '')}" for r in results if r.get('body')])
+                else:
+                    extracted_text = search_results_json
+                histories[chat_id]["messages"].append({"role": "system", "content": f"Актуальные факты: {extracted_text}"})
+                logger.info(f"Извлечено из поиска: {extracted_text[:200]}...")
+            except json.JSONDecodeError:
+                histories[chat_id]["messages"].append(
+                    {"role": "system", "content": f"Ошибка поиска: {search_results_json}"})
+
         histories[chat_id]["messages"].append({"role": "user", "content": user_input})
+        if len(histories[chat_id]["messages"]) > 20:
+            histories[chat_id]["messages"] = histories[chat_id]["messages"][:1] + histories[chat_id]["messages"][-19:]
+
+        messages = histories[chat_id]["messages"]
+
+        # Запрос к API
         models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
-        ai_response = None
-        error_msg = f"{user_name}, ошибка: Не удалось подключиться к ИИ. Проверьте настройки API или используйте базу знаний."
+        ai_response = "Извините, не удалось получить ответ от API. Проверьте подписку на SuperGrok или X Premium+."
+
         for model in models_to_try:
             try:
-                response = client.chat.completions.create(
+                completion = client.chat.completions.create(
                     model=model,
-                    messages=histories[chat_id]["messages"],
-                    max_tokens=1000
+                    messages=messages,
+                    temperature=0.7,
+                    stream=False
                 )
-                ai_response = response.choices[0].message.content.strip()
-                logger.info(f"Успешный запрос к модели {model} для user_id {user_id}")
+                ai_response = completion.choices[0].message.content.strip()
+                logger.info(f"Ответ модели {model} для user_id {user_id}: {ai_response}")
+                break
+            except openai.AuthenticationError as auth_err:
+                logger.error(f"Ошибка авторизации для {model}: {str(auth_err)}")
+                ai_response = "Ошибка авторизации: неверный API-ключ. Проверьте XAI_TOKEN."
+                break
+            except openai.APIError as api_err:
+                if "403" in str(api_err):
+                    logger.warning(f"403 Forbidden для {model}. Пробуем следующую модель.")
+                    continue
+                logger.error(f"Ошибка API для {model}: {str(api_err)}")
+                ai_response = f"Ошибка API: {str(api_err)}"
+                break
+            except openai.RateLimitError as rate_err:
+                logger.error(f"Превышен лимит для {model}: {str(rate_err)}")
+                ai_response = "Превышен лимит запросов. Попробуйте позже."
                 break
             except Exception as e:
-                logger.error(f"Ошибка Grok API для модели {model}: {str(e)}")
-                if "404" in str(e):
-                    error_msg = f"{user_name}, ошибка: Модель {model} недоступна. Проверьте XAI_TOKEN или обратитесь в поддержку xAI (team ID: 4c40134b-82d4-4d27-a7e0-c6566cc04178)."
-                continue
-
-        if ai_response:
-            response = f"{user_name}, {ai_response}"
-            histories[chat_id]["messages"].append({"role": "assistant", "content": ai_response})
-            await update.message.reply_text(response, reply_markup=default_reply_markup)
-            log_request(user_id, user_input, response)
+                logger.error(f"Неизвестная ошибка для {model}: {str(e)}")
+                ai_response = f"Неизвестная ошибка: {str(e)}"
+                break
         else:
-            await update.message.reply_text(error_msg, reply_markup=default_reply_markup)
-            log_request(user_id, user_input, error_msg)
+            logger.error("Все модели недоступны (403). Проверьте токен и подписку.")
+            ai_response = "Все модели недоступны (403). Обновите SuperGrok или X Premium+."
+
+        final_response = f"{user_name}, {ai_response}"
+        histories[chat_id]["messages"].append({"role": "assistant", "content": ai_response})
+        await update.message.reply_text(final_response, reply_markup=default_reply_markup)
+        log_request(user_id, user_input, final_response)
 
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
