@@ -366,7 +366,6 @@ def format_fact(fact: str, knowledge_base: List[Dict[str, Any]]) -> str:
         name, role = match.groups()
         name = name.strip()
         role = role.strip()
-        # Ищем расшифровку аббревиатур в роли
         for kb_fact in knowledge_base:
             abbreviation_match = re.match(r'^(\w+)\s*-\s*(.*)$', kb_fact['text'])
             if abbreviation_match:
@@ -523,7 +522,7 @@ def get_system_prompt(user_name: str) -> str:
 Сначала проверяйте базу знаний из таблицы knowledge_base. Если в базе есть подходящий факт, используйте только его, отформатированный в естественном виде.
 Если факта нет, отвечайте кратко, в дружелюбном тоне, используя свои знания.
 Для неформальных сообщений (например, "привет") отвечайте дружелюбно, без лишней информации.
-Не повторяйте имя пользователя в ответе, кроме как в начале.
+Не добавляйте имя пользователя в текст запроса к API, используйте только текст сообщения пользователя.
 """
 
 # Сохранение истории переписки
@@ -565,6 +564,7 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     fact = ' '.join(args).strip()
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
+        global KNOWLEDGE_BASE
         KNOWLEDGE_BASE = load_knowledge_base()
         await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
                                         reply_markup=ReplyKeyboardRemove())
@@ -1028,6 +1028,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             facts_text = "\n".join([f"- {fact['text']}" for fact in KNOWLEDGE_BASE]) or "База знаний пуста."
             full_system_prompt = f"{get_system_prompt(user_name)}\n\nФакты из базы знаний:\n{facts_text}"
             histories[chat_id] = {"name": user_name, "messages": [{"role": "system", "content": full_system_prompt}]}
+        # Отправляем в API только чистый текст запроса пользователя
         histories[chat_id]["messages"].append({"role": "user", "content": user_input})
         models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
         ai_response = None
@@ -1110,7 +1111,9 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for
         return
     region_folder = f"/regions/{profile['region']}/"
     create_yandex_folder(region_folder)
-    files = list_yandex_disk_files(region_folder)
+    files = list_yandex_diskਮ
+
+System: disk_files(region_folder)
     if not files:
         await update.message.reply_text(f"{user_name}, в папке {region_folder} нет файлов.",
                                         reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
