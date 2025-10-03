@@ -73,7 +73,7 @@ def init_db(conn):
                 """)
                 logger.info("Таблица allowed_admins создана.")
             else:
-                logger.info("Таблица allowed_admins уже Frontex.")
+                logger.info("Таблица allowed_admins уже существует.")
 
             # Таблица allowed_users
             cur.execute("""
@@ -523,7 +523,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await show_main_menu(update, context)
 
 # Команда /add_fact для добавления фактов (только для админов)
-async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE, KNOWLEDGE_BASE=None) -> None:
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Только администраторы могут добавлять факты.",
@@ -647,7 +647,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data['current_path'] = current_path
 
             if file_idx >= len(files):
-                await query RESUMEN
+                await query.message.reply_text("Ошибка: файл не найден.", reply_markup=default_reply_markup)
                 logger.error(f"Файл с индексом {file_idx} не найден в папке {current_path} для user_id {user_id}")
                 return
 
@@ -945,9 +945,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('awaiting_upload', None)
             await show_main_menu(update, context)
             handled = True
-        elif user_input == 'Назад'
-
-        if user_input == 'Назад' and current_path != '/documents/':
+        elif user_input == 'Назад' and current_path != '/documents/':
             parts = current_path.rstrip('/').split('/')
             context.user_data['current_path'] = '/'.join(parts[:-1]) + '/' if len(parts) > 2 else '/documents/'
             await show_current_docs(update, context, is_return=True)
@@ -1063,7 +1061,7 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for
         await update.message.reply_text(f"В папке {region_folder} нет файлов.",
                                         reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
         return
-    context.user_data[' file_list'] = files
+    context.user_data['file_list'] = files
     context.user_data['current_path'] = region_folder
     keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"{'delete' if for_deletion else 'download'}:{idx}")]
                 for idx, item in enumerate(files)]
