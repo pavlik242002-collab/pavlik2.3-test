@@ -519,7 +519,6 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
@@ -534,6 +533,7 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     fact = ' '.join(args).strip()
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
+        global KNOWLEDGE_BASE
         KNOWLEDGE_BASE = load_knowledge_base()
         await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
                                         reply_markup=ReplyKeyboardRemove())
@@ -544,7 +544,6 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Команда /delete_fact для удаления фактов (только для админов)
 async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
@@ -752,7 +751,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             fact_id = int(user_input)
             if delete_knowledge_fact(fact_id, user_id):
-                global KNOWLEDGE_BASE
                 KNOWLEDGE_BASE = load_knowledge_base()
                 await update.message.reply_text(f"{user_name}, факт с ID {fact_id} удалён.", reply_markup=default_reply_markup)
             else:
@@ -981,7 +979,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             histories[chat_id] = {"name": None, "messages": [{"role": "system", "content": system_prompt}]}
 
         # Добавляем базу знаний в контекст для всех пользователей
-        global KNOWLEDGE_BASE
         if KNOWLEDGE_BASE:
             knowledge_text = "Известные факты для использования в ответах: " + "; ".join([fact['text'] for fact in KNOWLEDGE_BASE])
             histories[chat_id]["messages"].insert(1, {"role": "system", "content": knowledge_text})
