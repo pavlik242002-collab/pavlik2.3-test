@@ -734,7 +734,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     handled = False
-
+#fjjffj
     # Обработка команд меню
     if user_input == "Документы для РО":
         context.user_data['current_mode'] = 'documents_nav'

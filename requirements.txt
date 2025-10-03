@@ -4,5 +4,5 @@ requests
 python-telegram-bot==21.4
 duckduckgo_search
 psycopg2-binary
-flask
 psycopg2
+flask
