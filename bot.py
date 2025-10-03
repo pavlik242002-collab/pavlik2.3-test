@@ -973,6 +973,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Если сообщение не было обработано как специальная команда или состояние, обрабатываем как запрос к AI
     if not handled:
+        logger.info(f"Обрабатываю AI-запрос для user_id {user_id}: {user_input}")
+        logger.info(f"История сообщений для chat_id {chat_id}: {histories.get(chat_id, {})}")
+        logger.info(f"База знаний: {KNOWLEDGE_BASE}")
         # Обработка текстового сообщения через API
         if chat_id not in histories:
             histories[chat_id] = {"name": None, "messages": [{"role": "system", "content": system_prompt}]}
@@ -989,9 +992,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "что такое", "информация о", "расскажи о", "найди", "поиск по", "детали о",
             "вскс", "спасатели", "корпус спасателей"
         ])
-
         if need_search:
-            logger.info(f"Выполняется поиск для запроса: {user_input}")
+            logger.info(f"Запускаю веб-поиск для запроса: {user_input}")
             search_results_json = web_search(user_input)
             try:
                 results = json.loads(search_results_json)
@@ -1005,6 +1007,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except json.JSONDecodeError:
                 histories[chat_id]["messages"].append(
                     {"role": "system", "content": f"Ошибка поиска: {search_results_json}"})
+        else:
+            logger.info(f"Веб-поиск не требуется для запроса: {user_input}")
 
         histories[chat_id]["messages"].append({"role": "user", "content": user_input})
         if len(histories[chat_id]["messages"]) > 20:
