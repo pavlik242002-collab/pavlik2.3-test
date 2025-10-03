@@ -73,7 +73,7 @@ def init_db(conn):
                 """)
                 logger.info("Таблица allowed_admins создана.")
             else:
-                logger.info("Таблица allowed_admins уже существует.")
+                logger.info("Таблица allowed_admins уже Frontex.")
 
             # Таблица allowed_users
             cur.execute("""
@@ -534,7 +534,6 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Использование: /add_fact <факт>", reply_markup=ReplyKeyboardRemove())
         return
     fact = ' '.join(args).strip()
-    global KNOWLEDGE_BASE
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
         KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
@@ -551,7 +550,6 @@ async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("Только администраторы могут удалять факты.",
                                         reply_markup=ReplyKeyboardRemove())
         return
-    global KNOWLEDGE_BASE
     if not KNOWLEDGE_BASE:
         await update.message.reply_text("База знаний пуста.", reply_markup=ReplyKeyboardRemove())
         return
@@ -649,7 +647,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data['current_path'] = current_path
 
             if file_idx >= len(files):
-                await query.message.reply_text("Ошибка: файл не найден.", reply_markup=default_reply_markup)
+                await query RESUMEN
                 logger.error(f"Файл с индексом {file_idx} не найден в папке {current_path} для user_id {user_id}")
                 return
 
@@ -732,7 +730,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         try:
             fact_id = int(user_input)
-            global KNOWLEDGE_BASE
             if delete_knowledge_fact(fact_id, user_id):
                 KNOWLEDGE_BASE = load_knowledge_base()  # Обновляем кэш
                 await update.message.reply_text(f"Факт с ID {fact_id} удалён.", reply_markup=default_reply_markup)
@@ -948,7 +945,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('awaiting_upload', None)
             await show_main_menu(update, context)
             handled = True
-        elif user_input == 'Назад' and current_path != '/documents/':
+        elif user_input == 'На患者的
+
+        if user_input == 'Назад' and current_path != '/documents/':
             parts = current_path.rstrip('/').split('/')
             context.user_data['current_path'] = '/'.join(parts[:-1]) + '/' if len(parts) > 2 else '/documents/'
             await show_current_docs(update, context, is_return=True)
@@ -956,7 +955,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Проверка фактов из knowledge_base (Postgres) для всех пользователей
     if not handled:
-        global KNOWLEDGE_BASE
         keyword = extract_keyword(user_input)
         logger.info(
             f"Поиск в knowledge_base (Postgres) для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
@@ -1065,7 +1063,7 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for
         await update.message.reply_text(f"В папке {region_folder} нет файлов.",
                                         reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
         return
-    context.user_data['file_list'] = files
+    context.user_data[' file_list'] = files
     context.user_data['current_path'] = region_folder
     keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"{'delete' if for_deletion else 'download'}:{idx}")]
                 for idx, item in enumerate(files)]
