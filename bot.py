@@ -52,13 +52,11 @@ client = OpenAI(
     api_key=XAI_TOKEN,
 )
 
-
 # Инициализация таблиц в PostgreSQL
 def init_db(conn):
     """Создаёт таблицы в базе данных, если они не существуют, сохраняя существующие данные."""
     try:
         with conn.cursor() as cur:
-            # Проверка и создание таблицы allowed_admins
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -76,7 +74,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_admins уже существует.")
 
-            # Проверка и создание таблицы allowed_users
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -93,7 +90,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_users уже существует.")
 
-            # Проверка и создание таблицы user_profiles
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -113,7 +109,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица user_profiles уже существует.")
 
-            # Проверка и создание таблицы request_logs
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -150,8 +145,7 @@ def init_db(conn):
         conn.rollback()
         raise
 
-
-init_db(conn)  # Инициализация таблиц без удаления данных
+init_db(conn)
 
 # Словарь федеральных округов
 FEDERAL_DISTRICTS = {
@@ -198,7 +192,6 @@ FEDERAL_DISTRICTS = {
     ]
 }
 
-
 # Функции для работы с администраторами
 def load_allowed_admins() -> List[int]:
     try:
@@ -216,7 +209,6 @@ def load_allowed_admins() -> List[int]:
         conn.rollback()
         return [6909708460]
 
-
 def save_allowed_admins(allowed_admins: List[int]) -> None:
     try:
         with conn.cursor() as cur:
@@ -228,7 +220,6 @@ def save_allowed_admins(allowed_admins: List[int]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении allowed_admins: {str(e)}")
         conn.rollback()
-
 
 # Функции для работы с пользователями
 def load_allowed_users() -> List[int]:
@@ -243,7 +234,6 @@ def load_allowed_users() -> List[int]:
         conn.rollback()
         return []
 
-
 def save_allowed_users(allowed_users: List[int]) -> None:
     try:
         with conn.cursor() as cur:
@@ -255,7 +245,6 @@ def save_allowed_users(allowed_users: List[int]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении allowed_users: {str(e)}")
         conn.rollback()
-
 
 # Функции для профилей пользователей
 def load_user_profiles() -> Dict[int, Dict[str, str]]:
@@ -272,7 +261,6 @@ def load_user_profiles() -> Dict[int, Dict[str, str]]:
         conn.rollback()
         return {}
 
-
 def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
     try:
         with conn.cursor() as cur:
@@ -287,7 +275,6 @@ def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении user_profiles: {str(e)}")
         conn.rollback()
-
 
 # Функции для работы с базой знаний в JSON
 def load_knowledge_base_json() -> List[str]:
@@ -313,7 +300,6 @@ def load_knowledge_base_json() -> List[str]:
         logger.error(f"Ошибка при загрузке knowledge_base.json: {str(e)}")
         return []
 
-
 def save_knowledge_base_json(facts: List[str]) -> None:
     try:
         with open('knowledge_base.json', 'w', encoding='utf-8') as f:
@@ -322,27 +308,23 @@ def save_knowledge_base_json(facts: List[str]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении knowledge_base.json: {str(e)}")
 
-
 # Функция для извлечения ключевого слова из запроса
 def extract_keyword(user_input: str) -> str:
     """Извлекает ключевое слово из запросов вида 'Что такое ВСКС' или 'Что значит ВСКС'."""
     user_input_lower = user_input.lower().strip()
-    # Удаляем префиксы вроде 'что такое', 'что значит', 'что'
     patterns = [
         r'^\s*(что\s+такое|что\s+значит|что)\s+(.+?)\s*$',
-        r'^\s*(.+?)\s*$'  # На случай, если нет префикса
+        r'^\s*(.+?)\s*$'
     ]
     for pattern in patterns:
         match = re.match(pattern, user_input_lower)
         if match:
-            # Возвращаем последнее слово или группу после префикса
             keyword = match.group(2) if len(match.groups()) > 1 else match.group(1)
             keyword = keyword.strip('?').strip()
             logger.debug(f"Извлечено ключевое слово: '{keyword}' из запроса '{user_input}'")
             return keyword
     logger.debug(f"Не удалось извлечь ключевое слово из запроса '{user_input}'")
     return user_input_lower
-
 
 # Функция для логирования запросов
 def log_request(user_id: int, request: str, response: str) -> None:
@@ -358,14 +340,12 @@ def log_request(user_id: int, request: str, response: str) -> None:
         logger.error(f"Ошибка при логировании запроса: {str(e)}")
         conn.rollback()
 
-
 # Функции для работы с Яндекс.Диском
 def create_yandex_folder(folder_path: str) -> bool:
     folder_path = folder_path.rstrip('/')
     url = f'https://cloud-api.yandex.net/v1/disk/resources?path={quote(folder_path)}'
     headers = {'Authorization': f'OAuth {YANDEX_TOKEN}', 'Content-Type': 'application/json'}
     try:
-        # Сначала проверяем, существует ли папка (GET-запрос)
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             logger.info(f"Папка {folder_path} уже существует")
@@ -374,7 +354,6 @@ def create_yandex_folder(folder_path: str) -> bool:
             logger.error(f"Ошибка авторизации Яндекс.Диска: {response.text}")
             return False
         elif response.status_code == 404:
-            # Папка не существует, создаем (PUT-запрос)
             response = requests.put(url, headers=headers)
             if response.status_code in (201, 409):
                 logger.info(f"Папка {folder_path} создана")
@@ -388,7 +367,6 @@ def create_yandex_folder(folder_path: str) -> bool:
     except Exception as e:
         logger.error(f"Ошибка при создании/проверке папки {folder_path}: {str(e)}")
         return False
-
 
 def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict[str, str]]:
     folder_path = folder_path.rstrip('/')
@@ -410,11 +388,9 @@ def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict
         logger.error(f"Ошибка при запросе списка элементов: {str(e)}")
         return []
 
-
 def list_yandex_disk_directories(folder_path: str) -> List[str]:
     items = list_yandex_disk_items(folder_path, item_type='dir')
     return [item['name'] for item in items]
-
 
 def list_yandex_disk_files(folder_path: str) -> List[Dict[str, str]]:
     folder_path = folder_path.rstrip('/')
@@ -423,7 +399,6 @@ def list_yandex_disk_files(folder_path: str) -> List[Dict[str, str]]:
     files = [item for item in items if item['name'].lower().endswith(supported_extensions)]
     logger.info(f"Найдено {len(files)} файлов в папке {folder_path}")
     return files
-
 
 def get_yandex_disk_file(file_path: str) -> str | None:
     file_path = file_path.rstrip('/')
@@ -442,7 +417,6 @@ def get_yandex_disk_file(file_path: str) -> str | None:
     except Exception as e:
         logger.error(f"Ошибка при запросе файла {file_path}: {str(e)}")
         return None
-
 
 def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str) -> bool:
     folder_path = folder_path.rstrip('/')
@@ -466,7 +440,6 @@ def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str)
         logger.error(f"Ошибка при загрузке файла {file_path}: {str(e)}")
         return False
 
-
 # Инициализация глобальных переменных
 ALLOWED_ADMINS = load_allowed_admins()
 ALLOWED_USERS = load_allowed_users()
@@ -482,7 +455,6 @@ system_prompt = """
 
 # Сохранение истории переписки
 histories: Dict[int, Dict[str, Any]] = {}
-
 
 # Обработчик команды /start
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -501,7 +473,6 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("Как я могу к Вам обращаться?", reply_markup=ReplyKeyboardRemove())
     else:
         await show_main_menu(update, context)
-
 
 # Команда /add_fact для добавления фактов
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -525,7 +496,6 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"Факт '{fact}' уже существует в базе знаний.",
                                         reply_markup=ReplyKeyboardRemove())
 
-
 # Отображение главного меню
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
@@ -545,7 +515,6 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('awaiting_admin_id', None)
     await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
-
 # Отображение меню управления пользователями
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
@@ -557,17 +526,14 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
-
 # Отображение содержимого папки в /documents/
 async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
     user_id: int = update.effective_user.id
     context.user_data.pop('file_list', None)
     current_path = context.user_data.get('current_path', '/documents/')
     folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
-    # Проверяем и создаем папку только если нужно, но продолжаем даже если ошибка создания (если уже существует)
     if not create_yandex_folder(current_path):
-        logger.warning(f"Не удалось создать папку {current_path}, возможно, она уже существует или проблема с токеном. Продолжаем...")
-        # Не выходим с ошибкой, а продолжаем показывать содержимое
+        logger.warning(f"Не удалось создать папку {current_path}, возможно, она уже существует или проблема с токеном.")
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
     logger.info(f"Пользователь {user_id} в папке {current_path}, найдено файлов: {len(files)}, папок: {len(dirs)}")
@@ -578,6 +544,7 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     if files:
         context.user_data['file_list'] = files
+        context.user_data['current_path'] = current_path  # Сохраняем путь для скачивания
         file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")] for idx, item in
                          enumerate(files)]
         file_reply_markup = InlineKeyboardMarkup(file_keyboard)
@@ -589,7 +556,6 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         await update.message.reply_text(f"Папка {folder_name} пуста.", reply_markup=reply_markup)
 
-
 # Обработка callback-запросов
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -600,35 +566,53 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if not profile or "region" not in profile:
         await query.message.reply_text("Ошибка: регион не определён.", reply_markup=default_reply_markup)
         return
-    if query.data.startswith("doc_download:"):
+
+    if query.data.startswith("doc_download:") or query.data.startswith("download:"):
         try:
             file_idx = int(query.data.split(":", 1)[1])
-            current_path = context.user_data.get('current_path', '/documents/')
+            # Определяем путь в зависимости от режима
+            if query.data.startswith("doc_download:"):
+                current_path = context.user_data.get('current_path', '/documents/')
+            else:  # download: для Архива документов РО
+                current_path = f"/regions/{profile['region']}/"
+
             files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
             context.user_data['file_list'] = files
+            context.user_data['current_path'] = current_path  # Сохраняем путь
+
             if file_idx >= len(files):
                 await query.message.reply_text("Ошибка: файл не найден.", reply_markup=default_reply_markup)
+                logger.error(f"Файл с индексом {file_idx} не найден в папке {current_path} для user_id {user_id}")
                 return
+
             file_name = files[file_idx]['name']
             file_path = f"{current_path.rstrip('/')}/{file_name}"
+            logger.info(f"Попытка скачать файл {file_path} для user_id {user_id}")
+
             download_url = get_yandex_disk_file(file_path)
             if not download_url:
-                await query.message.reply_text("Ошибка: не удалось получить ссылку на файл. Проверьте YANDEX_TOKEN.", reply_markup=default_reply_markup)
+                await query.message.reply_text("Ошибка: не удалось получить ссылку на файл. Проверьте YANDEX_TOKEN.",
+                                              reply_markup=default_reply_markup)
+                logger.error(f"Не удалось получить ссылку для файла {file_path}")
                 return
+
             file_response = requests.get(download_url)
             if file_response.status_code == 200:
                 file_size = len(file_response.content) / (1024 * 1024)
                 if file_size > 20:
                     await query.message.reply_text("Файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
+                    logger.warning(f"Файл {file_name} слишком большой: {file_size} МБ")
                     return
                 await query.message.reply_document(document=InputFile(file_response.content, filename=file_name))
-                logger.info(f"Файл {file_name} отправлен пользователю {user_id}.")
+                logger.info(f"Файл {file_name} успешно отправлен пользователю {user_id} из {current_path}")
             else:
-                await query.message.reply_text(f"Не удалось загрузить файл. Статус: {file_response.status_code}", reply_markup=default_reply_markup)
+                await query.message.reply_text(f"Не удалось загрузить файл. Статус: {file_response.status_code}",
+                                              reply_markup=default_reply_markup)
+                logger.error(f"Ошибка загрузки файла {file_path}: статус {file_response.status_code}")
         except Exception as e:
-            await query.message.reply_text(f"Ошибка при скачивании: {str(e)}. Проверьте YANDEX_TOKEN.", reply_markup=default_reply_markup)
+            await query.message.reply_text(f"Ошибка при скачивании: {str(e)}. Проверьте YANDEX_TOKEN.",
+                                          reply_markup=default_reply_markup)
             logger.error(f"Ошибка при отправке файла: {str(e)}")
-
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -668,7 +652,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     default_reply_markup = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = default_reply_markup
 
-    # Обработка ожидания user_id для добавления пользователя
     if context.user_data.get("awaiting_user_id", False):
         try:
             new_user_id = int(user_input)
@@ -688,7 +671,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
 
-    # Обработка ожидания admin_id для добавления администратора
     if context.user_data.get("awaiting_admin_id", False):
         try:
             new_admin_id = int(user_input)
@@ -708,7 +690,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
 
-    # Обработка регистрации
     if context.user_data.get("awaiting_federal_district", False):
         if user_input in FEDERAL_DISTRICTS:
             context.user_data["selected_federal_district"] = user_input
@@ -750,7 +731,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     handled = False
-    # Обработка команд меню
     if user_input == "Документы для РО":
         context.user_data['current_mode'] = 'documents_nav'
         context.user_data['current_path'] = '/documents/'
@@ -826,7 +806,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_main_menu(update, context)
         handled = True
 
-    # Обработка навигации по documents
     if context.user_data.get('current_mode') == 'documents_nav':
         current_path = context.user_data.get('current_path', '/documents/')
         dirs = list_yandex_disk_directories(current_path)
@@ -847,19 +826,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context, is_return=True)
             handled = True
 
-    # Обработка запросов к базе знаний и ИИ
     if not handled:
-        # Извлечение ключевого слова из запроса
         keyword = extract_keyword(user_input)
         logger.info(
             f"Поиск в knowledge_base.json для запроса '{user_input}' (ключевое слово: '{keyword}'); доступные факты: {KNOWLEDGE_BASE_JSON}")
 
-        # Проверка в базе знаний JSON
         if keyword:
             keyword_lower = keyword.lower().strip()
             for fact in KNOWLEDGE_BASE_JSON:
                 fact_lower = fact.lower().strip()
-                # Проверяем, начинается ли факт с ключевого слова или содержит его
                 if fact_lower.startswith(keyword_lower) or keyword_lower in fact_lower:
                     await update.message.reply_text(fact, reply_markup=default_reply_markup)
                     log_request(user_id, user_input, fact)
@@ -871,13 +846,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
 
-        # Запрос к Grok API с попыткой нескольких моделей
         logger.info(f"Факт для '{user_input}' не найден в knowledge_base.json, обращение к Grok API")
         if chat_id not in histories:
             histories[chat_id] = {"name": USER_PROFILES[user_id]["name"],
                                   "messages": [{"role": "system", "content": system_prompt}]}
         histories[chat_id]["messages"].append({"role": "user", "content": user_input})
-        models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]  # Список моделей для попыток
+        models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
         ai_response = None
         error_msg = "Ошибка: Не удалось подключиться к ИИ. Проверьте настройки API или используйте базу знаний."
         for model in models_to_try:
@@ -903,7 +877,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await update.message.reply_text(error_msg, reply_markup=default_reply_markup)
             log_request(user_id, user_input, error_msg)
-
 
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -936,25 +909,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.error(f"Ошибка обработки документа: {str(e)}")
     context.user_data.pop('awaiting_upload', None)
 
-
 # Отображение списка файлов
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for_deletion: bool = False) -> None:
     user_id: int = update.effective_user.id
     profile = USER_PROFILES.get(user_id)
+    if not profile or "region" not in profile:
+        await update.message.reply_text("Ошибка: регион не определён.",
+                                        reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
+        return
     region_folder = f"/regions/{profile['region']}/"
     create_yandex_folder(region_folder)
     files = list_yandex_disk_files(region_folder)
     if not files:
         await update.message.reply_text(f"В папке {region_folder} нет файлов.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
+                                        reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
         return
     context.user_data['file_list'] = files
+    context.user_data['current_path'] = region_folder  # Сохраняем путь для Архива
     keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"{'delete' if for_deletion else 'download'}:{idx}")]
                 for idx, item in enumerate(files)]
     await update.message.reply_text("Выберите файл для удаления:" if for_deletion else "Список всех файлов:",
                                     reply_markup=InlineKeyboardMarkup(keyboard))
-
 
 # Основная функция
 def main():
@@ -969,7 +944,6 @@ def main():
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
-
 
 if __name__ == '__main__':
     main()
