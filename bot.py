@@ -125,7 +125,6 @@ def init_db(conn):
                         id SERIAL PRIMARY KEY,
                         user_id BIGINT NOT NULL,
                         request_text TEXT NOT NULL,
-                        response_text TEXT,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -523,7 +522,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await show_main_menu(update, context)
 
 # Команда /add_fact для добавления фактов (только для админов)
-async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE, KNOWLEDGE_BASE=None) -> None:
+async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Только администраторы могут добавлять факты.",
@@ -682,6 +681,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE  # Явно указываем, что используем глобальную переменную
     user_id: int = update.effective_user.id
     chat_id: int = update.effective_chat.id
     user_input: str = update.message.text.strip()
