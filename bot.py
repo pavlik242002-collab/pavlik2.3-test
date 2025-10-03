@@ -365,17 +365,28 @@ def create_yandex_folder(folder_path: str) -> bool:
     url = f'https://cloud-api.yandex.net/v1/disk/resources?path={quote(folder_path)}'
     headers = {'Authorization': f'OAuth {YANDEX_TOKEN}', 'Content-Type': 'application/json'}
     try:
+        # Сначала проверяем, существует ли папка (GET-запрос)
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
+            logger.info(f"Папка {folder_path} уже существует")
             return True
-        response = requests.put(url, headers=headers)
-        if response.status_code in (201, 409):
-            logger.info(f"Папка {folder_path} создана")
-            return True
-        logger.error(f"Ошибка создания папки {folder_path}: {response.status_code}")
-        return False
+        elif response.status_code == 401:
+            logger.error(f"Ошибка авторизации Яндекс.Диска: {response.text}")
+            return False
+        elif response.status_code == 404:
+            # Папка не существует, создаем (PUT-запрос)
+            response = requests.put(url, headers=headers)
+            if response.status_code in (201, 409):
+                logger.info(f"Папка {folder_path} создана")
+                return True
+            else:
+                logger.error(f"Ошибка создания папки {folder_path}: {response.status_code} - {response.text}")
+                return False
+        else:
+            logger.error(f"Неожиданный статус при проверке папки {folder_path}: {response.status_code} - {response.text}")
+            return False
     except Exception as e:
-        logger.error(f"Ошибка при создании папки {folder_path}: {str(e)}")
+        logger.error(f"Ошибка при создании/проверке папки {folder_path}: {str(e)}")
         return False
 
 
@@ -390,7 +401,10 @@ def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict
             if item_type:
                 return [item for item in items if item['type'] == item_type]
             return items
-        logger.error(f"Ошибка Яндекс.Диска: {response.status_code}")
+        elif response.status_code == 401:
+            logger.error(f"Ошибка авторизации Яндекс.Диска при получении списка: {response.text}")
+        else:
+            logger.error(f"Ошибка Яндекс.Диска при получении списка: {response.status_code} - {response.text}")
         return []
     except Exception as e:
         logger.error(f"Ошибка при запросе списка элементов: {str(e)}")
@@ -420,7 +434,10 @@ def get_yandex_disk_file(file_path: str) -> str | None:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
             return response.json().get('href')
-        logger.error(f"Ошибка Яндекс.Диска для файла {file_path}: {response.status_code}")
+        elif response.status_code == 401:
+            logger.error(f"Ошибка авторизации Яндекс.Диска для файла {file_path}: {response.text}")
+        else:
+            logger.error(f"Ошибка Яндекс.Диска для файла {file_path}: {response.status_code} - {response.text}")
         return None
     except Exception as e:
         logger.error(f"Ошибка при запросе файла {file_path}: {str(e)}")
@@ -547,11 +564,10 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     context.user_data.pop('file_list', None)
     current_path = context.user_data.get('current_path', '/documents/')
     folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
+    # Проверяем и создаем папку только если нужно, но продолжаем даже если ошибка создания (если уже существует)
     if not create_yandex_folder(current_path):
-        await update.message.reply_text(f"Ошибка: не удалось создать папку {current_path}.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        return
+        logger.warning(f"Не удалось создать папку {current_path}, возможно, она уже существует или проблема с токеном. Продолжаем...")
+        # Не выходим с ошибкой, а продолжаем показывать содержимое
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
     logger.info(f"Пользователь {user_id} в папке {current_path}, найдено файлов: {len(files)}, папок: {len(dirs)}")
@@ -597,7 +613,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             file_path = f"{current_path.rstrip('/')}/{file_name}"
             download_url = get_yandex_disk_file(file_path)
             if not download_url:
-                await query.message.reply_text("Ошибка: не удалось получить ссылку.", reply_markup=default_reply_markup)
+                await query.message.reply_text("Ошибка: не удалось получить ссылку на файл. Проверьте YANDEX_TOKEN.", reply_markup=default_reply_markup)
                 return
             file_response = requests.get(download_url)
             if file_response.status_code == 200:
@@ -608,9 +624,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_document(document=InputFile(file_response.content, filename=file_name))
                 logger.info(f"Файл {file_name} отправлен пользователю {user_id}.")
             else:
-                await query.message.reply_text("Не удалось загрузить файл.", reply_markup=default_reply_markup)
+                await query.message.reply_text(f"Не удалось загрузить файл. Статус: {file_response.status_code}", reply_markup=default_reply_markup)
         except Exception as e:
-            await query.message.reply_text(f"Ошибка: {str(e)}", reply_markup=default_reply_markup)
+            await query.message.reply_text(f"Ошибка при скачивании: {str(e)}. Проверьте YANDEX_TOKEN.", reply_markup=default_reply_markup)
             logger.error(f"Ошибка при отправке файла: {str(e)}")
 
 
@@ -734,7 +750,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     handled = False
-#fjjffj
     # Обработка команд меню
     if user_input == "Документы для РО":
         context.user_data['current_mode'] = 'documents_nav'
@@ -915,9 +930,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if upload_to_yandex_disk(file_content, file_name, region_folder):
             await update.message.reply_text(f"Файл успешно загружен в папку {region_folder}")
         else:
-            await update.message.reply_text("Ошибка при загрузке файла.")
+            await update.message.reply_text("Ошибка при загрузке файла. Проверьте YANDEX_TOKEN.")
     except Exception as e:
-        await update.message.reply_text(f"Ошибка: {str(e)}")
+        await update.message.reply_text(f"Ошибка: {str(e)}. Проверьте YANDEX_TOKEN.")
         logger.error(f"Ошибка обработки документа: {str(e)}")
     context.user_data.pop('awaiting_upload', None)
 
