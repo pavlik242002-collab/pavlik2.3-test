@@ -519,6 +519,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
@@ -543,6 +544,7 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Команда /delete_fact для удаления фактов (только для админов)
 async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     user_name = USER_PROFILES.get(user_id, {}).get("name", "Администратор")
     if user_id not in ALLOWED_ADMINS:
@@ -700,6 +702,7 @@ def log_request(user_id: int, request: str, response: str) -> None:
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global KNOWLEDGE_BASE
     user_id: int = update.effective_user.id
     chat_id: int = update.effective_chat.id
     user_input: str = update.message.text.strip()
@@ -928,22 +931,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await delete_fact(update, context)
         handled = True
 
-    elif user_input == "Загрузить файл":
-        profile = USER_PROFILES.get(user_id)
-        if not profile or "region" not in profile:
-            await update.message.reply_text(f"{user_name}, ошибка: регион не определён.", reply_markup=default_reply_markup)
-            return
-        context.user_data['awaiting_upload'] = True
-        context.user_data.pop('current_mode', None)
-        context.user_data.pop('current_path', None)
-        context.user_data.pop('file_list', None)
-        await update.message.reply_text(
-            f"{user_name}, прикрепите файл для загрузки в папку /regions/{profile['region']}/. "
-            "Поддерживаются: .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg (до 50 МБ).",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        logger.info(f"Пользователь {user_id} готовится загрузить файл в /regions/{profile['region']}/")
-        handled = True
-
     elif user_input == "Назад":
         context.user_data.pop('awaiting_upload', None)
         context.user_data.pop('awaiting_fact_id', None)
@@ -975,7 +962,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not handled:
         logger.info(f"Обрабатываю AI-запрос для user_id {user_id}: {user_input}")
         logger.info(f"История сообщений для chat_id {chat_id}: {histories.get(chat_id, {})}")
-        logger.info(f"База знаний: {KNOWLEDGE_BASE}")
+        if not KNOWLEDGE_BASE:
+            logger.warning("База знаний пуста или не загружена")
+            KNOWLEDGE_BASE = load_knowledge_base()
+        logger.info(f"База знаний содержит {len(KNOWLEDGE_BASE)} фактов")
         # Обработка текстового сообщения через API
         if chat_id not in histories:
             histories[chat_id] = {"name": None, "messages": [{"role": "system", "content": system_prompt}]}
