@@ -533,7 +533,6 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     fact = ' '.join(args).strip()
     if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
         save_knowledge_fact(fact, user_id)
-        global KNOWLEDGE_BASE
         KNOWLEDGE_BASE = load_knowledge_base()
         await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
                                         reply_markup=ReplyKeyboardRemove())
