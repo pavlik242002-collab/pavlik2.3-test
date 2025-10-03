@@ -13,6 +13,7 @@ from telegram import InputFile
 from urllib.parse import quote
 from openai import OpenAI
 import psycopg2
+from fuzzywuzzy import fuzz  # Добавляем fuzzywuzzy для нечёткого поиска
 
 # Настройка логирования
 logging.basicConfig(
@@ -496,16 +497,16 @@ KNOWLEDGE_BASE = load_knowledge_base()  # Загружаем факты из Pos
 
 # Системный промпт для ИИ
 system_prompt = """
-Вы — полезный чат-бот, который логически анализирует историю переписки. 
-Сначала проверяй базу знаний из таблицы knowledge_base. Если ответа нет, используй свои знания.
-Отвечай кратко, на русском языке, без лишних объяснений.
+Вы — полезный чат-бот, который отвечает на русском языке, основываясь на предоставленных фактах из базы знаний. 
+Если точного ответа нет, используйте факты для формирования логичного ответа. 
+Отвечай кратко, без лишних объяснений. 
 """
 
 # Сохранение истории переписки
 histories: Dict[int, Dict[str, Any]] = {}
 
 # Обработчик команды /start
-async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def send_welcome(updateabe: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
         await update.message.reply_text(f"Ваш user_id: {user_id}\nИзвините, у вас нет доступа.",
@@ -524,7 +525,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE  # Добавляем global для доступа к глобальной переменной
+    global KNOWLEDGE_BASE  # Явно указываем, что используем глобальную переменную
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Только администраторы могут добавлять факты.",
@@ -962,7 +963,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
         if keyword:
             keyword_lower = keyword.lower().strip()
-            matching_facts = [fact['text'] for fact in KNOWLEDGE_BASE if keyword_lower in fact['text'].lower()]
+            matching_facts = []
+            for fact in KNOWLEDGE_BASE:
+                fact_text_lower = fact['text'].lower()
+                # Проверяем нечёткое соответствие (порог 80%)
+                if fuzz.partial_ratio(keyword_lower, fact_text_lower) >= 80:
+                    matching_facts.append(fact['text'])
+                    logger.debug(f"Факт '{fact['text']}' соответствует запросу '{keyword_lower}' (score: {fuzz.partial_ratio(keyword_lower, fact_text_lower)})")
+                # Также проверяем совпадение слов
+                elif any(word.lower() in fact_text_lower.split() for word in keyword_lower.split()):
+                    matching_facts.append(fact['text'])
+                    logger.debug(f"Факт '{fact['text']}' содержит слово из запроса '{keyword_lower}'")
+
             if matching_facts:
                 response = "\n".join(matching_facts)
                 await update.message.reply_text(response, reply_markup=default_reply_markup)
@@ -975,11 +987,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
 
-        # Если факты не найдены, обращаемся к Grok API
+        # Если факты не найдены, обращаемся к Grok API с передачей всех фактов
         logger.info(f"Факт для '{user_input}' не найден в knowledge_base, обращение к Grok API")
         if chat_id not in histories:
+            # Формируем системный промпт с фактами
+            facts_text = "\n".join([f"- {fact['text']}" for fact in KNOWLEDGE_BASE]) or "База знаний пуста."
+            full_system_prompt = f"{system_prompt}\n\nФакты из базы знаний:\n{facts_text}"
             histories[chat_id] = {"name": USER_PROFILES[user_id]["name"],
-                                  "messages": [{"role": "system", "content": system_prompt}]}
+                                  "messages": [{"role": "system", "content": full_system_prompt}]}
         histories[chat_id]["messages"].append({"role": "user", "content": user_input})
         models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
         ai_response = None

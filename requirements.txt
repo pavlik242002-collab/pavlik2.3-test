@@ -6,3 +6,5 @@ duckduckgo_search
 psycopg2-binary
 psycopg2
 flask
+fuzzywuzzy
+python-Levenshtein
