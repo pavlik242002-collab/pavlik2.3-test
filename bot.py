@@ -513,6 +513,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('file_list', None)
     context.user_data.pop('awaiting_user_id', None)
     context.user_data.pop('awaiting_admin_id', None)
+    context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
     await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
 # Отображение меню управления пользователями
@@ -544,7 +545,7 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     if files:
         context.user_data['file_list'] = files
-        context.user_data['current_path'] = current_path  # Сохраняем путь для скачивания
+        context.user_data['current_path'] = current_path
         file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")] for idx, item in
                          enumerate(files)]
         file_reply_markup = InlineKeyboardMarkup(file_keyboard)
@@ -570,15 +571,14 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     if query.data.startswith("doc_download:") or query.data.startswith("download:"):
         try:
             file_idx = int(query.data.split(":", 1)[1])
-            # Определяем путь в зависимости от режима
             if query.data.startswith("doc_download:"):
                 current_path = context.user_data.get('current_path', '/documents/')
-            else:  # download: для Архива документов РО
+            else:
                 current_path = f"/regions/{profile['region']}/"
 
             files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
             context.user_data['file_list'] = files
-            context.user_data['current_path'] = current_path  # Сохраняем путь
+            context.user_data['current_path'] = current_path
 
             if file_idx >= len(files):
                 await query.message.reply_text("Ошибка: файл не найден.", reply_markup=default_reply_markup)
@@ -735,6 +735,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data['current_mode'] = 'documents_nav'
         context.user_data['current_path'] = '/documents/'
         context.user_data.pop('file_list', None)
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         create_yandex_folder('/documents/')
         await show_current_docs(update, context)
         handled = True
@@ -743,6 +744,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data.pop('current_mode', None)
         context.user_data.pop('current_path', None)
         context.user_data.pop('file_list', None)
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await show_file_list(update, context)
         handled = True
 
@@ -751,6 +753,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут управлять пользователями.",
                                             reply_markup=default_reply_markup)
             return
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await show_admin_menu(update, context)
         handled = True
 
@@ -760,6 +763,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         context.user_data["awaiting_user_id"] = True
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await update.message.reply_text("Введите user_id нового пользователя (число):",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         handled = True
@@ -770,6 +774,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         context.user_data["awaiting_admin_id"] = True
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await update.message.reply_text("Введите user_id нового администратора (число):",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         handled = True
@@ -779,6 +784,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут просматривать список пользователей.",
                                             reply_markup=default_reply_markup)
             return
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         users_list = "\n".join([f"ID: {uid}" for uid in ALLOWED_USERS]) or "Список пользователей пуст."
         await update.message.reply_text(f"Список пользователей:\n{users_list}",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
@@ -789,6 +795,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут просматривать список администраторов.",
                                             reply_markup=default_reply_markup)
             return
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         admins_list = "\n".join([f"ID: {aid}" for aid in ALLOWED_ADMINS]) or "Список администраторов пуст."
         await update.message.reply_text(f"Список администраторов:\n{admins_list}",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
@@ -799,10 +806,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут удалять файлы.",
                                             reply_markup=default_reply_markup)
             return
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await show_file_list(update, context, for_deletion=True)
         handled = True
 
+    elif user_input == "Загрузить файл":
+        profile = USER_PROFILES.get(user_id)
+        if not profile or "region" not in profile:
+            await update.message.reply_text("Ошибка: регион не определён.", reply_markup=default_reply_markup)
+            return
+        context.user_data['awaiting_upload'] = True
+        context.user_data.pop('current_mode', None)
+        context.user_data.pop('current_path', None)
+        context.user_data.pop('file_list', None)
+        await update.message.reply_text(
+            f"Прикрепите файл для загрузки в папку /regions/{profile['region']}/. "
+            "Поддерживаются: .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg (до 50 МБ).",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        logger.info(f"Пользователь {user_id} готовится загрузить файл в /regions/{profile['region']}/")
+        handled = True
+
     elif user_input == "Назад":
+        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
         await show_main_menu(update, context)
         handled = True
 
@@ -818,6 +843,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context)
             handled = True
         elif user_input == 'В главное меню':
+            context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
             await show_main_menu(update, context)
             handled = True
         elif user_input == 'Назад' and current_path != '/documents/':
@@ -890,24 +916,34 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.cdr', '.eps', '.png', '.jpg', '.jpeg')):
         await update.message.reply_text(
             "Поддерживаются только файлы .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.")
+        context.user_data.pop('awaiting_upload', None)
         return
     file_size = document.file_size / (1024 * 1024)
     if file_size > 50:
         await update.message.reply_text("Файл слишком большой (>50 МБ).")
+        context.user_data.pop('awaiting_upload', None)
         return
     profile = USER_PROFILES.get(user_id)
+    if not profile or "region" not in profile:
+        await update.message.reply_text("Ошибка: регион не определён.")
+        context.user_data.pop('awaiting_upload', None)
+        return
     region_folder = f"/regions/{profile['region']}/"
+    create_yandex_folder(region_folder)
     try:
         file = await context.bot.get_file(document.file_id)
         file_content = await file.download_as_bytearray()
         if upload_to_yandex_disk(file_content, file_name, region_folder):
             await update.message.reply_text(f"Файл успешно загружен в папку {region_folder}")
+            logger.info(f"Файл {file_name} загружен пользователем {user_id} в {region_folder}")
         else:
             await update.message.reply_text("Ошибка при загрузке файла. Проверьте YANDEX_TOKEN.")
+            logger.error(f"Ошибка загрузки файла {file_name} в {region_folder} для user_id {user_id}")
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)}. Проверьте YANDEX_TOKEN.")
-        logger.error(f"Ошибка обработки документа: {str(e)}")
+        logger.error(f"Ошибка обработки документа {file_name}: {str(e)}")
     context.user_data.pop('awaiting_upload', None)
+    await show_main_menu(update, context)
 
 # Отображение списка файлов
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for_deletion: bool = False) -> None:
@@ -925,7 +961,7 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE, for
                                         reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
         return
     context.user_data['file_list'] = files
-    context.user_data['current_path'] = region_folder  # Сохраняем путь для Архива
+    context.user_data['current_path'] = region_folder
     keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"{'delete' if for_deletion else 'download'}:{idx}")]
                 for idx, item in enumerate(files)]
     await update.message.reply_text("Выберите файл для удаления:" if for_deletion else "Список всех файлов:",
