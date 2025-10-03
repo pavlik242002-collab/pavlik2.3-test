@@ -513,7 +513,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('file_list', None)
     context.user_data.pop('awaiting_user_id', None)
     context.user_data.pop('awaiting_admin_id', None)
-    context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+    context.user_data.pop('awaiting_upload', None)
     await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
 # Отображение меню управления пользователями
@@ -735,7 +735,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data['current_mode'] = 'documents_nav'
         context.user_data['current_path'] = '/documents/'
         context.user_data.pop('file_list', None)
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         create_yandex_folder('/documents/')
         await show_current_docs(update, context)
         handled = True
@@ -744,7 +744,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data.pop('current_mode', None)
         context.user_data.pop('current_path', None)
         context.user_data.pop('file_list', None)
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await show_file_list(update, context)
         handled = True
 
@@ -753,7 +753,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут управлять пользователями.",
                                             reply_markup=default_reply_markup)
             return
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await show_admin_menu(update, context)
         handled = True
 
@@ -763,7 +763,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         context.user_data["awaiting_user_id"] = True
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await update.message.reply_text("Введите user_id нового пользователя (число):",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         handled = True
@@ -774,7 +774,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         context.user_data["awaiting_admin_id"] = True
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await update.message.reply_text("Введите user_id нового администратора (число):",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         handled = True
@@ -784,7 +784,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут просматривать список пользователей.",
                                             reply_markup=default_reply_markup)
             return
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         users_list = "\n".join([f"ID: {uid}" for uid in ALLOWED_USERS]) or "Список пользователей пуст."
         await update.message.reply_text(f"Список пользователей:\n{users_list}",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
@@ -795,7 +795,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут просматривать список администраторов.",
                                             reply_markup=default_reply_markup)
             return
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         admins_list = "\n".join([f"ID: {aid}" for aid in ALLOWED_ADMINS]) or "Список администраторов пуст."
         await update.message.reply_text(f"Список администраторов:\n{admins_list}",
                                         reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
@@ -806,7 +806,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("Только администраторы могут удалять файлы.",
                                             reply_markup=default_reply_markup)
             return
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await show_file_list(update, context, for_deletion=True)
         handled = True
 
@@ -827,7 +827,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         handled = True
 
     elif user_input == "Назад":
-        context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+        context.user_data.pop('awaiting_upload', None)
         await show_main_menu(update, context)
         handled = True
 
@@ -843,7 +843,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context)
             handled = True
         elif user_input == 'В главное меню':
-            context.user_data.pop('awaiting_upload', None)  # Очищаем флаг загрузки
+            context.user_data.pop('awaiting_upload', None)
             await show_main_menu(update, context)
             handled = True
         elif user_input == 'Назад' and current_path != '/documents/':
@@ -852,10 +852,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context, is_return=True)
             handled = True
 
+    # Проверка фактов из knowledge_base.json для всех пользователей
     if not handled:
         keyword = extract_keyword(user_input)
         logger.info(
-            f"Поиск в knowledge_base.json для запроса '{user_input}' (ключевое слово: '{keyword}'); доступные факты: {KNOWLEDGE_BASE_JSON}")
+            f"Поиск в knowledge_base.json для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
 
         if keyword:
             keyword_lower = keyword.lower().strip()
@@ -872,6 +873,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
 
+        # Если факт не найден, обращаемся к Grok API
         logger.info(f"Факт для '{user_input}' не найден в knowledge_base.json, обращение к Grok API")
         if chat_id not in histories:
             histories[chat_id] = {"name": USER_PROFILES[user_id]["name"],
