@@ -945,7 +945,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('awaiting_upload', None)
             await show_main_menu(update, context)
             handled = True
-        elif user_input == 'На患者的
+        elif user_input == 'Назад'
 
         if user_input == 'Назад' and current_path != '/documents/':
             parts = current_path.rstrip('/').split('/')
