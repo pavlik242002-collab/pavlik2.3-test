@@ -57,6 +57,7 @@ def init_db(conn):
     """Создаёт таблицы в базе данных, если они не существуют, сохраняя существующие данные."""
     try:
         with conn.cursor() as cur:
+            # Таблица allowed_admins
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -74,6 +75,7 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_admins уже существует.")
 
+            # Таблица allowed_users
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -90,6 +92,7 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_users уже существует.")
 
+            # Таблица user_profiles
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -109,6 +112,7 @@ def init_db(conn):
             else:
                 logger.info("Таблица user_profiles уже существует.")
 
+            # Таблица request_logs
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -137,6 +141,37 @@ def init_db(conn):
                     cur.execute("ALTER TABLE request_logs ADD COLUMN request_text TEXT NOT NULL;")
                     logger.info("Добавлен столбец request_text в таблицу request_logs.")
                 logger.info("Таблица request_logs уже существует.")
+
+            # Новая таблица knowledge_base для фактов (доступна всем, добавление только админам)
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'knowledge_base'
+                );
+            """)
+            if not cur.fetchone()[0]:
+                cur.execute("""
+                    CREATE TABLE knowledge_base (
+                        id SERIAL PRIMARY KEY,
+                        fact_text TEXT NOT NULL,
+                        added_by BIGINT NOT NULL,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                # Добавляем начальные факты, если их нет
+                initial_facts = [
+                    ("Привет! Чем могу помочь?", 6909708460),
+                    ("Документы по награждениям находятся в папке /documents/Награждения.", 6909708460),
+                    ("Всё отлично, спасибо за вопрос!", 6909708460),
+                    ("ВСКС - Всероссийский студенческий корпус спасателей", 6909708460)
+                ]
+                for fact, admin_id in initial_facts:
+                    cur.execute("""
+                        INSERT INTO knowledge_base (fact_text, added_by) VALUES (%s, %s) ON CONFLICT DO NOTHING
+                    """, (fact, admin_id))
+                logger.info("Таблица knowledge_base создана с начальными фактами.")
+            else:
+                logger.info("Таблица knowledge_base уже существует.")
 
             conn.commit()
             logger.info("Все таблицы проверены и созданы при необходимости.")
@@ -276,37 +311,33 @@ def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
         logger.error(f"Ошибка при сохранении user_profiles: {str(e)}")
         conn.rollback()
 
-# Функции для работы с базой знаний в JSON
-def load_knowledge_base_json() -> List[str]:
+# Функции для работы с базой знаний в Postgres (доступна всем, добавление только админам)
+def load_knowledge_base() -> List[str]:
+    """Загружает все факты из таблицы knowledge_base (доступно всем пользователям)."""
     try:
-        if os.path.exists('knowledge_base.json'):
-            with open('knowledge_base.json', 'r', encoding='utf-8') as f:
-                facts = json.load(f)
-                if not isinstance(facts, list):
-                    facts = []
-                facts = [str(fact).strip() for fact in facts]
-        else:
-            facts = [
-                "Привет! Чем могу помочь?",
-                "Документы по награждениям находятся в папке /documents/Награждения.",
-                "Всё отлично, спасибо за вопрос!",
-                "ВСКС Всероссийский студенческий корпус спасателей"
-            ]
-            with open('knowledge_base.json', 'w', encoding='utf-8') as f:
-                json.dump(facts, f, ensure_ascii=False, indent=4)
-        logger.info(f"Загружено {len(facts)} фактов из knowledge_base.json: {facts}")
-        return facts
+        with conn.cursor() as cur:
+            cur.execute("SELECT fact_text FROM knowledge_base ORDER BY timestamp DESC")
+            facts = [row[0] for row in cur.fetchall()]
+            logger.info(f"Загружено {len(facts)} фактов из таблицы knowledge_base")
+            return facts
     except Exception as e:
-        logger.error(f"Ошибка при загрузке knowledge_base.json: {str(e)}")
+        logger.error(f"Ошибка при загрузке knowledge_base: {str(e)}")
+        conn.rollback()
         return []
 
-def save_knowledge_base_json(facts: List[str]) -> None:
+def save_knowledge_fact(fact: str, added_by: int) -> None:
+    """Добавляет факт в таблицу knowledge_base (только для админов)."""
     try:
-        with open('knowledge_base.json', 'w', encoding='utf-8') as f:
-            json.dump(facts, f, ensure_ascii=False, indent=4)
-        logger.info(f"Сохранено {len(facts)} фактов в knowledge_base.json")
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO knowledge_base (fact_text, added_by) VALUES (%s, %s)",
+                (fact.strip(), added_by)
+            )
+            conn.commit()
+            logger.info(f"Факт '{fact}' добавлен в knowledge_base администратором {added_by}")
     except Exception as e:
-        logger.error(f"Ошибка при сохранении knowledge_base.json: {str(e)}")
+        logger.error(f"Ошибка при сохранении факта в knowledge_base: {str(e)}")
+        conn.rollback()
 
 # Функция для извлечения ключевого слова из запроса
 def extract_keyword(user_input: str) -> str:
@@ -444,7 +475,7 @@ def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str)
 ALLOWED_ADMINS = load_allowed_admins()
 ALLOWED_USERS = load_allowed_users()
 USER_PROFILES = load_user_profiles()
-KNOWLEDGE_BASE_JSON = load_knowledge_base_json()
+KNOWLEDGE_BASE = load_knowledge_base()  # Загружаем факты из Postgres (доступно всем)
 
 # Системный промпт для ИИ
 system_prompt = """
@@ -474,7 +505,7 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         await show_main_menu(update, context)
 
-# Команда /add_fact для добавления фактов
+# Команда /add_fact для добавления фактов (только для админов)
 async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     if user_id not in ALLOWED_ADMINS:
@@ -486,12 +517,12 @@ async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Использование: /add_fact <факт>", reply_markup=ReplyKeyboardRemove())
         return
     fact = ' '.join(args).strip()
-    global KNOWLEDGE_BASE_JSON
-    if fact not in KNOWLEDGE_BASE_JSON:
-        KNOWLEDGE_BASE_JSON.append(fact)
-        save_knowledge_base_json(KNOWLEDGE_BASE_JSON)
+    global KNOWLEDGE_BASE
+    if fact not in KNOWLEDGE_BASE:
+        save_knowledge_fact(fact, user_id)
+        KNOWLEDGE_BASE.append(fact)  # Обновляем кэш в памяти
         await update.message.reply_text(f"Факт '{fact}' добавлен в базу знаний.", reply_markup=ReplyKeyboardRemove())
-        logger.info(f"Факт '{fact}' добавлен администратором {user_id} в knowledge_base.json")
+        logger.info(f"Факт '{fact}' добавлен администратором {user_id} в knowledge_base")
     else:
         await update.message.reply_text(f"Факт '{fact}' уже существует в базе знаний.",
                                         reply_markup=ReplyKeyboardRemove())
@@ -852,21 +883,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await show_current_docs(update, context, is_return=True)
             handled = True
 
-    # Проверка фактов из knowledge_base.json для всех пользователей
+    # Проверка фактов из knowledge_base (Postgres) для всех пользователей
     if not handled:
+        global KNOWLEDGE_BASE  # Используем кэш из Postgres
         keyword = extract_keyword(user_input)
         logger.info(
-            f"Поиск в knowledge_base.json для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
+            f"Поиск в knowledge_base (Postgres) для запроса '{user_input}' (ключевое слово: '{keyword}') от user_id {user_id} (админ: {user_id in ALLOWED_ADMINS})")
 
         if keyword:
             keyword_lower = keyword.lower().strip()
-            for fact in KNOWLEDGE_BASE_JSON:
+            for fact in KNOWLEDGE_BASE:
                 fact_lower = fact.lower().strip()
                 if fact_lower.startswith(keyword_lower) or keyword_lower in fact_lower:
                     await update.message.reply_text(fact, reply_markup=default_reply_markup)
                     log_request(user_id, user_input, fact)
                     logger.info(
-                        f"Ответ найден в knowledge_base.json для запроса '{user_input}' (ключевое слово: '{keyword}'): {fact}")
+                        f"Ответ найден в knowledge_base (Postgres) для запроса '{user_input}' (ключевое слово: '{keyword}'): {fact}")
                     return
                 else:
                     logger.debug(f"Факт '{fact}' не соответствует ключевому слову '{keyword_lower}'")
@@ -874,7 +906,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.warning(f"Ключевое слово не извлечено из запроса '{user_input}'")
 
         # Если факт не найден, обращаемся к Grok API
-        logger.info(f"Факт для '{user_input}' не найден в knowledge_base.json, обращение к Grok API")
+        logger.info(f"Факт для '{user_input}' не найден в knowledge_base, обращение к Grok API")
         if chat_id not in histories:
             histories[chat_id] = {"name": USER_PROFILES[user_id]["name"],
                                   "messages": [{"role": "system", "content": system_prompt}]}
