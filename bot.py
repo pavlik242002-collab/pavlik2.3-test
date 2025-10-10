@@ -68,187 +68,257 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS allowed_admins (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT UNIQUE NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS allowed_users (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT UNIQUE NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS user_profiles (
-            user_id BIGINT PRIMARY KEY,
-            fio TEXT,
-            name TEXT,
-            region TEXT
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS knowledge_base (
-            id SERIAL PRIMARY KEY,
-            fact TEXT UNIQUE NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS request_logs (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT NOT NULL,
-            timestamp TIMESTAMP NOT NULL,
-            message TEXT NOT NULL,
-            response TEXT
-        )
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-    logger.info("Таблицы в БД инициализированы.")
+    try:
+        # Создаём только таблицы, которых может не быть
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id BIGINT PRIMARY KEY,
+                fio TEXT,
+                name TEXT,
+                region TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_base (
+                id SERIAL PRIMARY KEY,
+                fact TEXT UNIQUE NOT NULL
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS request_logs (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                message TEXT NOT NULL,
+                response TEXT
+            )
+        """)
+        conn.commit()
+        logger.info("Таблицы user_profiles, knowledge_base и request_logs инициализированы.")
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации БД: {str(e)}")
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
 # Функции для работы с администраторами
 def load_allowed_admins() -> List[int]:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT user_id FROM allowed_admins")
-    admins = [row[0] for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    if not admins:
-        add_allowed_admin(123456789)
-        admins = [123456789]
-    return admins
+    try:
+        cur.execute("SELECT id FROM allowed_admins")
+        admins = [row[0] for row in cur.fetchall()]
+        if not admins:
+            logger.info("Таблица allowed_admins пуста, добавляем дефолтного админа.")
+            add_allowed_admin(123456789)
+            admins = [123456789]
+        logger.info(f"Загружено {len(admins)} администраторов.")
+        return admins
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке администраторов: {str(e)}")
+        return [123456789]  # Дефолтный админ, если ошибка
+    finally:
+        cur.close()
+        conn.close()
 
 def add_allowed_admin(user_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO allowed_admins (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("INSERT INTO allowed_admins (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (user_id,))
+        conn.commit()
+        logger.info(f"Добавлен администратор: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении администратора {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 def remove_allowed_admin(user_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM allowed_admins WHERE user_id = %s", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("DELETE FROM allowed_admins WHERE id = %s", (user_id,))
+        conn.commit()
+        logger.info(f"Удалён администратор: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении администратора {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 # Функции для работы с пользователями
 def load_allowed_users() -> List[int]:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT user_id FROM allowed_users")
-    users = [row[0] for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return users
+    try:
+        cur.execute("SELECT id FROM allowed_users")
+        users = [row[0] for row in cur.fetchall()]
+        logger.info(f"Загружено {len(users)} пользователей.")
+        return users
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке пользователей: {str(e)}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
 
 def add_allowed_user(user_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO allowed_users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("INSERT INTO allowed_users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (user_id,))
+        conn.commit()
+        logger.info(f"Добавлен пользователь: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении пользователя {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 def remove_allowed_user(user_id: int) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM allowed_users WHERE user_id = %s", (user_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("DELETE FROM allowed_users WHERE id = %s", (user_id,))
+        conn.commit()
+        logger.info(f"Удалён пользователь: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении пользователя {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 # Функции для профилей пользователей
 def load_user_profiles() -> Dict[int, Dict[str, str]]:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT user_id, fio, name, region FROM user_profiles")
-    profiles = {row[0]: {"fio": row[1], "name": row[2], "region": row[3]} for row in cur.fetchall()}
-    cur.close()
-    conn.close()
-    return profiles
+    try:
+        cur.execute("SELECT user_id, fio, name, region FROM user_profiles")
+        profiles = {row[0]: {"fio": row[1], "name": row[2], "region": row[3]} for row in cur.fetchall()}
+        logger.info(f"Загружено {len(profiles)} профилей пользователей.")
+        return profiles
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке профилей пользователей: {str(e)}")
+        return {}
+    finally:
+        cur.close()
+        conn.close()
 
 def save_user_profile(user_id: int, profile: Dict[str, str]) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO user_profiles (user_id, fio, name, region) 
-        VALUES (%s, %s, %s, %s) 
-        ON CONFLICT (user_id) DO UPDATE SET fio = EXCLUDED.fio, name = EXCLUDED.name, region = EXCLUDED.region
-    """, (user_id, profile.get("fio"), profile.get("name"), profile.get("region")))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("""
+            INSERT INTO user_profiles (user_id, fio, name, region) 
+            VALUES (%s, %s, %s, %s) 
+            ON CONFLICT (user_id) DO UPDATE SET fio = EXCLUDED.fio, name = EXCLUDED.name, region = EXCLUDED.region
+        """, (user_id, profile.get("fio"), profile.get("name"), profile.get("region")))
+        conn.commit()
+        logger.info(f"Сохранён профиль пользователя: {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении профиля пользователя {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 # Функции для базы знаний
 def load_knowledge_base() -> List[str]:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT fact FROM knowledge_base")
-    facts = [row[0] for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    logger.info(f"Загружено {len(facts)} фактов из БД.")
-    return facts
+    try:
+        cur.execute("SELECT fact FROM knowledge_base")
+        facts = [row[0] for row in cur.fetchall()]
+        logger.info(f"Загружено {len(facts)} фактов из БД.")
+        return facts
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке базы знаний: {str(e)}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
 
 def list_knowledge_with_ids() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("SELECT id, fact FROM knowledge_base")
-    facts = [{"id": row[0], "fact": row[1]} for row in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return facts
+    try:
+        cur.execute("SELECT id, fact FROM knowledge_base")
+        facts = [{"id": row[0], "fact": row[1]} for row in cur.fetchall()]
+        logger.info(f"Загружено {len(facts)} фактов с ID.")
+        return facts
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке фактов с ID: {str(e)}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
 
 def add_knowledge(fact: str) -> None:
     if not fact.strip():
         return
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO knowledge_base (fact) VALUES (%s) ON CONFLICT (fact) DO NOTHING", (fact.strip(),))
-    conn.commit()
-    cur.close()
-    conn.close()
-    logger.info(f"Добавлен факт: {fact}")
+    try:
+        cur.execute("INSERT INTO knowledge_base (fact) VALUES (%s) ON CONFLICT (fact) DO NOTHING", (fact.strip(),))
+        conn.commit()
+        logger.info(f"Добавлен факт в БД: {fact}")
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении факта: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 def remove_knowledge_by_id(fact_id: int) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM knowledge_base WHERE id = %s", (fact_id,))
-    deleted = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
-    if deleted:
-        logger.info(f"Факт с ID {fact_id} удалён.")
-    return deleted
+    try:
+        cur.execute("DELETE FROM knowledge_base WHERE id = %s", (fact_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+        if deleted:
+            logger.info(f"Факт с ID {fact_id} удалён из БД.")
+        return deleted
+    except Exception as e:
+        logger.error(f"Ошибка при удалении факта с ID {fact_id}: {str(e)}")
+        return False
+    finally:
+        cur.close()
+        conn.close()
 
 def remove_knowledge_by_text(fact_text: str) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("DELETE FROM knowledge_base WHERE fact = %s", (fact_text.strip(),))
-    deleted = cur.rowcount > 0
-    conn.commit()
-    cur.close()
-    conn.close()
-    return deleted
+    try:
+        cur.execute("DELETE FROM knowledge_base WHERE fact = %s", (fact_text.strip(),))
+        deleted = cur.rowcount > 0
+        conn.commit()
+        if deleted:
+            logger.info(f"Факт удалён из БД: {fact_text}")
+        return deleted
+    except Exception as e:
+        logger.error(f"Ошибка при удалении факта по тексту: {str(e)}")
+        return False
+    finally:
+        cur.close()
+        conn.close()
 
 # Функция для логирования запросов
 def log_request(user_id: int, message: str, response: str | None = None) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO request_logs (user_id, timestamp, message, response) 
-        VALUES (%s, %s, %s, %s)
-    """, (user_id, datetime.now(), message, response))
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute("""
+            INSERT INTO request_logs (user_id, timestamp, message, response) 
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, datetime.now(), message, response))
+        conn.commit()
+        logger.info(f"Логирован запрос от пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при логировании запроса от {user_id}: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
 
 # Словарь федеральных округов
 FEDERAL_DISTRICTS = {
