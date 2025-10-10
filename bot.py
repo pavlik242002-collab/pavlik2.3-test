@@ -144,39 +144,7 @@ def init_db(conn):
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
-                initial_facts = [
-                    ("Привет! Чем могу помочь?", 6909708460),
-                    ("Документы по награждениям находятся в папке /documents/Награждения.", 6909708460),
-                    ("Всё отлично, спасибо за вопрос!", 6909708460),
-                    ("ВСКС - Всероссийский студенческий корпус спасателей, основанный 22 апреля 2001 года. Организация объединяет свыше 8 000 добровольцев из 88 субъектов России, которые участвуют в ликвидации последствий чрезвычайных ситуаций, таких как пожары и наводнения, а также проводят гуманитарные миссии.",
-                     6909708460),
-                    ("Козеев Евгений Викторович - Руководитель ВСКС", 6909708460),
-                    ("Гуманитарные миссии - Всероссийский студенческий корпус спасателей (ВСКС) проводит гуманитарные миссии по нескольким направлениям: Ростовская область, Курская область, Запорожская область, Херсонская область, Донецкая Народная Республика, Луганская Народная Республика. Гуманитарные миссии проводятся 2 раза в месяц, каждые 1-15 и 15-30 числа месяца. Условия: проживание, питание и проезд за счёт ВСКС и партнёров. Заявки для участия можно подать через @kristina_pavlik.",
-                     6909708460),
-                    ("ЧС в которых ВСКС принимал участие - Добровольцы ВСКС приняли участие в ликвидации свыше 50 крупных чрезвычайных ситуаций и их последствий. Студенты-спасатели участвовали в ликвидации последствий лесных пожаров в Центральном федеральном округе, Тюменской области, Красноярском и Забайкальском краях; наводнений в Иркутской, Оренбургской, Курганской областях, Краснодарском и Алтайском краях, на Дальнем Востоке, в Республике Крым; степных пожаров в Забайкальском крае, ликвидации последствий разлива нефтепродуктов в Чёрное море и других ЧС. Добровольцы также помогают в ликвидации ЧС и их последствий на региональном уровне.",
-                     6909708460),
-                    ("В ВСКС - Свыше 8 000 добровольцев из 88 субъектов Российской Федерации.", 6909708460),
-                    ("ВСКС основан - 22 апреля 2001 года по инициативе министра МЧС России того времени Сергея Кужугетовича Шойгу.",
-                     6909708460),
-                    ("Багаутдинов Ахмет Айратович - Начальник отдела регионального взаимодействия ЦУ ВСКС, координирует работу отдела, контакт: @baa_msk.",
-                     6909708460),
-                    ("Павлик Кристина Валентиновна - Заместитель начальника отдела регионального взаимодействия ЦУ ВСКС, занимается набором добровольцев на гуманитарные миссии ВСКС и ликвидации последствий ЧС, контакт: @kristina_pavlik.",
-                     6909708460),
-                    ("Кременецкая Галина Сергеевна - Сотрудник отдела регионального взаимодействия ЦУ ВСКС, занимается набором добровольцев из региональных отделений ВСКС на обучение по первоначальной подготовке спасателей на базе Всероссийского центра координации, подготовки и переподготовки студенческих добровольных спасательных формирований (ВЦПСФ), контакт: @ikremenetskaya.",
-                     6909708460),
-                    ("Локтионова Дарья Петровна - Сотрудник отдела регионального взаимодействия ЦУ ВСКС, занимается обработкой служебных записок региональных отделений ВСКС по выдаче форменной одежды, контакт: @otoorukun.",
-                     6909708460),
-                    ("Форум ВСКС - Всероссийский форум волонтёров безопасности.", 6909708460),
-                    ("Слёт ВСКС - Всероссийский слёт студентов-спасателей и добровольцев в ЧС, V Всероссийский слёт студентов-спасателей и добровольцев в ЧС пройдёт с 30 сентября по 5 октября 2025 года на территории учебно-тренировочного полигона пожарных и спасателей в Московской области.",
-                     6909708460),
-                    ("Андреев Алексей Евгеньевич - Заместитель руководителя ВСКС по развитию региональных отделений ВСКС и взаимодействию с ними.",
-                     6909708460)
-                ]
-                for fact, admin_id in initial_facts:
-                    cur.execute("""
-                        INSERT INTO knowledge_base (fact_text, added_by) VALUES (%s, %s) ON CONFLICT DO NOTHING
-                    """, (fact, admin_id))
-                logger.info("Таблица knowledge_base создана с начальными фактами.")
+                logger.info("Таблица knowledge_base создана.")
             else:
                 logger.info("Таблица knowledge_base уже существует.")
 
@@ -694,53 +662,6 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await show_main_menu(update, context)
 
 
-# Команда /add_fact для добавления фактов (только для админов)
-async def add_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
-    user_id: int = update.effective_user.id
-    user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
-        await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
-                                        reply_markup=ReplyKeyboardRemove())
-        return
-    args = context.args
-    if not args:
-        await update.message.reply_text(f"{user_name}, использование: /add_fact <факт>",
-                                        reply_markup=ReplyKeyboardRemove())
-        return
-    fact = ' '.join(args).strip()
-    if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
-        save_knowledge_fact(fact, user_id)
-        KNOWLEDGE_BASE = load_knowledge_base()
-        await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
-                                        reply_markup=ReplyKeyboardRemove())
-        logger.info(f"Факт '{fact}' добавлен администратором {user_id} в knowledge_base")
-    else:
-        await update.message.reply_text(f"{user_name}, факт '{fact}' уже существует в базе знаний.",
-                                        reply_markup=ReplyKeyboardRemove())
-
-
-# Команда /delete_fact для удаления фактов (только для админов)
-async def delete_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
-    user_id: int = update.effective_user.id
-    user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
-        await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
-                                        reply_markup=ReplyKeyboardRemove())
-        return
-    if not KNOWLEDGE_BASE:
-        await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardRemove())
-        return
-    facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
-    context.user_data["awaiting_fact_id"] = True
-    await update.message.reply_text(
-        f"{user_name}, выберите ID факта для удаления:\n{facts_list}\n\nВведите ID:",
-        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
-    )
-    logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты:\n{facts_list}")
-
-
 # Отображение главного меню
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
@@ -762,6 +683,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('awaiting_upload', None)
     context.user_data.pop('awaiting_fact_id', None)
     context.user_data.pop('awaiting_delete_user_id', None)
+    context.user_data.pop('awaiting_new_fact', None)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 
@@ -773,6 +695,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ['Добавить пользователя', 'Добавить администратора'],
         ['Список пользователей', 'Список администраторов'],
         ['Удалить пользователя', 'Удалить файл'],
+        ['Все факты (с ID)', 'Добавить факт'],
         ['Удалить факт', 'Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -938,7 +861,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         if user_input == "Назад":
             context.user_data.pop("awaiting_fact_id", None)
-            await show_main_menu(update, context)
+            await show_admin_menu(update, context)
             return
         try:
             fact_id = int(user_input)
@@ -953,6 +876,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except ValueError:
             await update.message.reply_text(f"{user_name}, введите корректный ID факта (число).",
                                             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    if context.user_data.get("awaiting_new_fact", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
+                                            reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_new_fact", None)
+            return
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_new_fact", None)
+            await show_admin_menu(update, context)
+            return
+        fact = user_input.strip()
+        if not any(f['text'] == fact for f in KNOWLEDGE_BASE):
+            save_knowledge_fact(fact, user_id)
+            KNOWLEDGE_BASE = load_knowledge_base()
+            await update.message.reply_text(f"{user_name}, факт '{fact}' добавлен в базу знаний.",
+                                            reply_markup=default_reply_markup)
+            logger.info(f"Факт '{fact}' добавлен администратором {user_id} в knowledge_base")
+        else:
+            await update.message.reply_text(f"{user_name}, факт '{fact}' уже существует в базе знаний.",
+                                            reply_markup=default_reply_markup)
+        context.user_data.pop("awaiting_new_fact", None)
         return
 
     if context.user_data.get("awaiting_user_id", False):
@@ -1155,19 +1101,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         handled = True
 
+    elif user_input == "Все факты (с ID)":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать факты.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data.pop('awaiting_upload', None)
+        if not KNOWLEDGE_BASE:
+            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+        await update.message.reply_text(f"{user_name}, все факты:\n{facts_list}", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты:\n{facts_list}")
+        handled = True
+
+    elif user_input == "Добавить факт":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data["awaiting_new_fact"] = True
+        context.user_data.pop('awaiting_upload', None)
+        await update.message.reply_text(f"{user_name}, введите текст нового факта:", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        handled = True
+
     elif user_input == "Удалить факт":
         if user_id not in ALLOWED_ADMINS:
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
                                             reply_markup=default_reply_markup)
             return
         context.user_data.pop('awaiting_upload', None)
-        await delete_fact(update, context)
+        if not KNOWLEDGE_BASE:
+            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+        context.user_data["awaiting_fact_id"] = True
+        await update.message.reply_text(
+            f"{user_name}, выберите ID факта для удаления:\n{facts_list}\n\nВведите ID:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
+        )
+        logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты:\n{facts_list}")
         handled = True
 
     elif user_input == "Назад":
         context.user_data.pop('awaiting_upload', None)
         context.user_data.pop('awaiting_fact_id', None)
         context.user_data.pop('awaiting_delete_user_id', None)
+        context.user_data.pop('awaiting_new_fact', None)
         await show_main_menu(update, context)
         handled = True
 
@@ -1281,8 +1261,6 @@ def main():
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
         app.add_handler(CommandHandler("start", send_welcome))
-        app.add_handler(CommandHandler("add_fact", add_fact))
-        app.add_handler(CommandHandler("delete_fact", delete_fact))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         app.add_handler(CallbackQueryHandler(handle_callback_query))
