@@ -26,6 +26,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Инициализация глобальных переменных по умолчанию
+ALLOWED_ADMINS = [123456789]  # Дефолтный админ
+ALLOWED_USERS = []
+USER_PROFILES = {}
+KNOWLEDGE_BASE = []
+
 # Загрузка переменных окружения
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -78,8 +84,6 @@ def init_db():
                 region TEXT
             )
         """)
-        # Таблицы allowed_admins и allowed_users не трогаем, так как они уже существуют
-        # Таблицы knowledge_base и request_logs тоже не создаём, так как они существуют
         conn.commit()
         logger.info("Таблица user_profiles инициализирована.")
     except Exception as e:
@@ -353,7 +357,7 @@ FEDERAL_DISTRICTS = {
     ]
 }
 
-# Инициализация глобальных переменных
+# Попытка загрузки данных из БД
 try:
     init_db()
     ALLOWED_ADMINS = load_allowed_admins()
@@ -362,11 +366,7 @@ try:
     KNOWLEDGE_BASE = load_knowledge_base()
 except Exception as e:
     logger.error(f"Ошибка при инициализации глобальных переменных: {str(e)}")
-    ALLOWED_ADMINS = [123456789]  # Дефолтный админ
-    ALLOWED_USERS = []
-    USER_PROFILES = {}
-    KNOWLEDGE_BASE = []
-    logger.info("Установлены значения по умолчанию для глобальных переменных.")
+    logger.info("Оставлены значения по умолчанию для глобальных переменных.")
 
 # Системный промпт для ИИ
 system_prompt = """
@@ -566,6 +566,7 @@ async def handle_forget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Обработчик команды /start
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global ALLOWED_USERS, ALLOWED_ADMINS
     if update.effective_user is None or update.effective_chat is None:
         logger.error("Ошибка: update.effective_user или update.effective_chat is None")
         await update.message.reply_text("Ошибка: не удалось определить пользователя или чат.")
@@ -574,8 +575,9 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id: int = update.effective_user.id
     context.user_data.clear()
 
-    if not ALLOWED_USERS or not ALLOWED_ADMINS:
-        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+    # Проверка наличия глобальных переменных
+    if 'ALLOWED_USERS' not in globals() or 'ALLOWED_ADMINS' not in globals():
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не определены, устанавливаем значения по умолчанию.")
         ALLOWED_USERS = []
         ALLOWED_ADMINS = [123456789]
 
@@ -615,14 +617,16 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # Обработчик команды /getfile
 async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global ALLOWED_USERS, ALLOWED_ADMINS
     if update.effective_user is None or update.effective_chat is None:
         logger.error("Ошибка: update.effective_user или update.effective_chat is None")
         await update.message.reply_text("Ошибка: не удалось определить пользователя или чат.")
         return
 
     user_id: int = update.effective_user.id
-    if not ALLOWED_USERS or not ALLOWED_ADMINS:
-        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+    # Проверка наличия глобальных переменных
+    if 'ALLOWED_USERS' not in globals() or 'ALLOWED_ADMINS' not in globals():
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не определены, устанавливаем значения по умолчанию.")
         ALLOWED_USERS = []
         ALLOWED_ADMINS = [123456789]
 
@@ -909,7 +913,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    global KNOWLEDGE_BASE
+    global KNOWLEDGE_BASE, ALLOWED_USERS, ALLOWED_ADMINS
     if update.effective_user is None or update.effective_chat is None:
         logger.error("Ошибка: update.effective_user или update.effective_chat is None")
         await update.message.reply_text("Ошибка: не удалось определить пользователя или чат.")
@@ -921,8 +925,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info(f"Получено сообщение от {chat_id} (user_id: {user_id}): {user_input}")
     log_request(user_id, user_input)
 
-    if not ALLOWED_USERS or not ALLOWED_ADMINS:
-        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+    # Проверка наличия глобальных переменных
+    if 'ALLOWED_USERS' not in globals() or 'ALLOWED_ADMINS' not in globals():
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не определены, устанавливаем значения по умолчанию.")
         ALLOWED_USERS = []
         ALLOWED_ADMINS = [123456789]
 
