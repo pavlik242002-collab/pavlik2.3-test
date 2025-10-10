@@ -78,23 +78,10 @@ def init_db():
                 region TEXT
             )
         """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS knowledge_base (
-                id SERIAL PRIMARY KEY,
-                fact TEXT UNIQUE NOT NULL
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS request_logs (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                timestamp TIMESTAMP NOT NULL,
-                message TEXT NOT NULL,
-                response TEXT
-            )
-        """)
+        # Таблицы allowed_admins и allowed_users не трогаем, так как они уже существуют
+        # Таблицы knowledge_base и request_logs тоже не создаём, так как они существуют
         conn.commit()
-        logger.info("Таблицы user_profiles, knowledge_base и request_logs инициализированы.")
+        logger.info("Таблица user_profiles инициализирована.")
     except Exception as e:
         logger.error(f"Ошибка при инициализации БД: {str(e)}")
         raise
@@ -228,7 +215,7 @@ def load_knowledge_base() -> List[str]:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT fact FROM knowledge_base")
+        cur.execute("SELECT fact_text FROM knowledge_base")
         facts = [row[0] for row in cur.fetchall()]
         logger.info(f"Загружено {len(facts)} фактов из БД.")
         return facts
@@ -243,7 +230,7 @@ def list_knowledge_with_ids() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, fact FROM knowledge_base")
+        cur.execute("SELECT id, fact_text FROM knowledge_base")
         facts = [{"id": row[0], "fact": row[1]} for row in cur.fetchall()]
         logger.info(f"Загружено {len(facts)} фактов с ID.")
         return facts
@@ -254,15 +241,16 @@ def list_knowledge_with_ids() -> List[Dict[str, Any]]:
         cur.close()
         conn.close()
 
-def add_knowledge(fact: str) -> None:
+def add_knowledge(fact: str, user_id: int) -> None:
     if not fact.strip():
         return
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO knowledge_base (fact) VALUES (%s) ON CONFLICT (fact) DO NOTHING", (fact.strip(),))
+        cur.execute("INSERT INTO knowledge_base (fact_text, added_by, timestamp) VALUES (%s, %s, %s) ON CONFLICT (fact_text) DO NOTHING",
+                    (fact.strip(), user_id, datetime.now()))
         conn.commit()
-        logger.info(f"Добавлен факт в БД: {fact}")
+        logger.info(f"Добавлен факт в БД: {fact} (добавил user_id: {user_id})")
     except Exception as e:
         logger.error(f"Ошибка при добавлении факта: {str(e)}")
     finally:
@@ -290,7 +278,7 @@ def remove_knowledge_by_text(fact_text: str) -> bool:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("DELETE FROM knowledge_base WHERE fact = %s", (fact_text.strip(),))
+        cur.execute("DELETE FROM knowledge_base WHERE fact_text = %s", (fact_text.strip(),))
         deleted = cur.rowcount > 0
         conn.commit()
         if deleted:
@@ -304,14 +292,14 @@ def remove_knowledge_by_text(fact_text: str) -> bool:
         conn.close()
 
 # Функция для логирования запросов
-def log_request(user_id: int, message: str, response: str | None = None) -> None:
+def log_request(user_id: int, request_text: str, response_text: str | None = None) -> None:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
         cur.execute("""
-            INSERT INTO request_logs (user_id, timestamp, message, response) 
+            INSERT INTO request_logs (user_id, timestamp, request_text, response_text) 
             VALUES (%s, %s, %s, %s)
-        """, (user_id, datetime.now(), message, response))
+        """, (user_id, datetime.now(), request_text, response_text))
         conn.commit()
         logger.info(f"Логирован запрос от пользователя {user_id}")
     except Exception as e:
@@ -366,11 +354,19 @@ FEDERAL_DISTRICTS = {
 }
 
 # Инициализация глобальных переменных
-init_db()
-ALLOWED_ADMINS = load_allowed_admins()
-ALLOWED_USERS = load_allowed_users()
-USER_PROFILES = load_user_profiles()
-KNOWLEDGE_BASE = load_knowledge_base()
+try:
+    init_db()
+    ALLOWED_ADMINS = load_allowed_admins()
+    ALLOWED_USERS = load_allowed_users()
+    USER_PROFILES = load_user_profiles()
+    KNOWLEDGE_BASE = load_knowledge_base()
+except Exception as e:
+    logger.error(f"Ошибка при инициализации глобальных переменных: {str(e)}")
+    ALLOWED_ADMINS = [123456789]  # Дефолтный админ
+    ALLOWED_USERS = []
+    USER_PROFILES = {}
+    KNOWLEDGE_BASE = []
+    logger.info("Установлены значения по умолчанию для глобальных переменных.")
 
 # Системный промпт для ИИ
 system_prompt = """
@@ -543,7 +539,7 @@ async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     fact = ' '.join(context.args)
-    add_knowledge(fact)
+    add_knowledge(fact, user_id)
     KNOWLEDGE_BASE = load_knowledge_base()
     await update.message.reply_text(f"Факт добавлен: '{fact}'. Теперь бот использует его во всех ответах!")
     logger.info(f"Администратор {user_id} добавил факт: {fact}")
@@ -577,6 +573,11 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     user_id: int = update.effective_user.id
     context.user_data.clear()
+
+    if not ALLOWED_USERS or not ALLOWED_ADMINS:
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+        ALLOWED_USERS = []
+        ALLOWED_ADMINS = [123456789]
 
     if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
         await update.message.reply_text(f"Ваш user_id: {user_id}\nИзвините, у вас нет доступа. Передайте user_id администратору.", reply_markup=ReplyKeyboardRemove())
@@ -620,6 +621,11 @@ async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     user_id: int = update.effective_user.id
+    if not ALLOWED_USERS or not ALLOWED_ADMINS:
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+        ALLOWED_USERS = []
+        ALLOWED_ADMINS = [123456789]
+
     if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Извините, у вас нет доступа.", reply_markup=ReplyKeyboardRemove())
         return
@@ -915,6 +921,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     logger.info(f"Получено сообщение от {chat_id} (user_id: {user_id}): {user_input}")
     log_request(user_id, user_input)
 
+    if not ALLOWED_USERS or not ALLOWED_ADMINS:
+        logger.warning("ALLOWED_USERS или ALLOWED_ADMINS не инициализированы, устанавливаем значения по умолчанию.")
+        ALLOWED_USERS = []
+        ALLOWED_ADMINS = [123456789]
+
     if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
         await update.message.reply_text("Извините, у вас нет доступа.", reply_markup=ReplyKeyboardRemove())
         return
@@ -1169,7 +1180,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if context.user_data.get('awaiting_fact_add'):
         fact = user_input.strip()
-        add_knowledge(fact)
+        add_knowledge(fact, user_id)
         KNOWLEDGE_BASE = load_knowledge_base()
         await update.message.reply_text(f"Факт добавлен: '{fact}'.", reply_markup=default_reply_markup)
         context.user_data.pop('awaiting_fact_add')
