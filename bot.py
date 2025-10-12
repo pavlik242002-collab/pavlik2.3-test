@@ -1233,8 +1233,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     context.user_data['current_answers'] = answers
                     update_report_answers(report_id, user_id, answers, 'in_progress')
                     next_question = questions[question_index + 1]
+                    # Исправляем нумерацию вопроса (было question_index + 2, теперь question_index + 1)
                     await update.message.reply_text(
-                        f"{user_name}, вопрос {question_index + 2}:\n{next_question}",
+                        f"{user_name}, вопрос {context.user_data['current_question_index'] + 1}:\n{next_question}",
                         reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
                     )
                 else:
@@ -1256,7 +1257,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('current_report_id', None)
             context.user_data.pop('current_question_index', None)
             context.user_data.pop('current_answers', None)
-            return
+        return  # Добавляем return, чтобы предотвратить вызов AI
 
     if user_input == "Загрузить файл":
         context.user_data["awaiting_upload"] = True
