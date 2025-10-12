@@ -4,3 +4,5 @@ requests
 openai
 psycopg2-binary
 duckduckgo_search
+pandas
+openpyxl

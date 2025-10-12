@@ -15,6 +15,8 @@ from urllib.parse import quote
 from openai import OpenAI
 import psycopg2
 from duckduckgo_search import DDGS
+import pandas as pd
+from io import BytesIO
 
 # Настройка логирования
 logging.basicConfig(
@@ -776,7 +778,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ['Удалить пользователя', 'Удалить файл'],
         ['Все факты (с ID)', 'Добавить факт'],
         ['Удалить факт', 'Рассылка'],
-        ['Просмотреть отчеты'],
+        ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
         ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -1545,6 +1547,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     report_text += "\n"
                 await send_long_text(update, report_text, reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_report_week", None)
+        except ValueError:
+            await update.message.reply_text(
+                f"{user_name}, введите корректный номер недели и год (например, '42 2025').",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+    elif user_input == "Выгрузить отчеты в Excel":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data["awaiting_export_week"] = True
+        context.user_data.pop('awaiting_upload', None)
+        await update.message.reply_text(
+            f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif context.user_data.get("awaiting_export_week", False):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_export_week", None)
+            await show_admin_menu(update, context)
+            return
+        try:
+            week_number, year = map(int, user_input.split())
+            reports = get_reports_by_week(week_number, year)
+            if not reports:
+                await update.message.reply_text(
+                    f"{user_name}, отчеты за неделю {week_number} {year} не найдены.",
+                    reply_markup=default_reply_markup
+                )
+                context.user_data.pop("awaiting_export_week", None)
+                return
+            # Подготовка данных для Excel
+            data = []
+            for report in reports:
+                user_profile = USER_PROFILES.get(report['user_id'], {})
+                user_name_report = user_profile.get('name', f"ID {report['user_id']}")
+                region = user_profile.get('region', 'Не указан')
+                row = {
+                    'User ID': report['user_id'],
+                    'Имя': user_name_report,
+                    'Регион': region,
+                    'Статус': report['status'],
+                    'Создано': report['created_at'].strftime('%Y-%m-%d %H:%M:%S') if report['created_at'] else '',
+                }
+                for idx, (question, answer) in enumerate(zip(report['questions'], report['answers'] or []), 1):
+                    row[f'Вопрос {idx}'] = question
+                    row[f'Ответ {idx}'] = answer or 'Не заполнено'
+                data.append(row)
+            # Создание DataFrame и Excel
+            df = pd.DataFrame(data)
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name=f'Отчеты_неделя_{week_number}_{year}')
+            output.seek(0)
+            # Отправка файла
+            file_name = f'reports_week_{week_number}_{year}.xlsx'
+            await update.message.reply_document(
+                document=InputFile(output, filename=file_name),
+                caption=f"{user_name}, отчеты за неделю {week_number} {year} выгружены в Excel."
+            )
+            logger.info(f"Отчеты за неделю {week_number} {year} выгружены в Excel для админа {user_id}")
+            context.user_data.pop("awaiting_export_week", None)
+            await show_admin_menu(update, context)
         except ValueError:
             await update.message.reply_text(
                 f"{user_name}, введите корректный номер недели и год (например, '42 2025').",
