@@ -684,6 +684,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('awaiting_fact_id', None)
     context.user_data.pop('awaiting_delete_user_id', None)
     context.user_data.pop('awaiting_new_fact', None)
+    context.user_data.pop('awaiting_broadcast', None)
+    context.user_data.pop('broadcast_type', None)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 
@@ -696,10 +698,23 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ['Список пользователей', 'Список администраторов'],
         ['Удалить пользователя', 'Удалить файл'],
         ['Все факты (с ID)', 'Добавить факт'],
-        ['Удалить факт', 'Назад']
+        ['Удалить факт', 'Рассылка'],
+        ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
+
+# Отображение меню рассылки
+async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Рассылка пользователям', 'Рассылка админам'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите тип рассылки:", reply_markup=reply_markup)
 
 
 # Отображение содержимого папки в /documents/
@@ -859,6 +874,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ]
     default_reply_markup = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = default_reply_markup
+
+    if context.user_data.get('awaiting_broadcast', False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                            reply_markup=default_reply_markup)
+            context.user_data.pop('awaiting_broadcast', None)
+            context.user_data.pop('broadcast_type', None)
+            return
+        if user_input == "Назад":
+            context.user_data.pop('awaiting_broadcast', None)
+            context.user_data.pop('broadcast_type', None)
+            await show_broadcast_menu(update, context)
+            return
+        broadcast_message = user_input.strip()
+        broadcast_type = context.user_data.get('broadcast_type')
+        if broadcast_type == 'users':
+            recipients = ALLOWED_USERS.copy()  # Копируем, чтобы избежать изменений во время итерации
+        elif broadcast_type == 'admins':
+            recipients = ALLOWED_ADMINS.copy()
+        else:
+            await update.message.reply_text(f"{user_name}, ошибка типа рассылки.",
+                                            reply_markup=default_reply_markup)
+            context.user_data.pop('awaiting_broadcast', None)
+            context.user_data.pop('broadcast_type', None)
+            return
+
+        sent_count = 0
+        for recipient_id in recipients:
+            if recipient_id == user_id:  # Не отправляем самому себе
+                continue
+            try:
+                await context.bot.send_message(chat_id=recipient_id, text=broadcast_message)
+                sent_count += 1
+            except Exception as e:
+                logger.error(f"Ошибка отправки сообщения пользователю {recipient_id}: {str(e)}")
+
+        await update.message.reply_text(f"{user_name}, рассылка отправлена {sent_count} получателям.",
+                                        reply_markup=default_reply_markup)
+        context.user_data.pop('awaiting_broadcast', None)
+        context.user_data.pop('broadcast_type', None)
+        return
 
     if context.user_data.get("awaiting_fact_id", False):
         if user_id not in ALLOWED_ADMINS:
@@ -1049,6 +1105,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_admin_menu(update, context)
         handled = True
 
+    elif user_input == "Рассылка":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data.pop('awaiting_upload', None)
+        await show_broadcast_menu(update, context)
+        handled = True
+
+    elif user_input == "Рассылка пользователям":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data['broadcast_type'] = 'users'
+        context.user_data['awaiting_broadcast'] = True
+        await update.message.reply_text(f"{user_name}, введите текст сообщения для рассылки пользователям:",
+                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        handled = True
+
+    elif user_input == "Рассылка админам":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                            reply_markup=default_reply_markup)
+            return
+        context.user_data['broadcast_type'] = 'admins'
+        context.user_data['awaiting_broadcast'] = True
+        await update.message.reply_text(f"{user_name}, введите текст сообщения для рассылки администраторам:",
+                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        handled = True
+
     elif user_input == "Добавить пользователя":
         if user_id not in ALLOWED_ADMINS:
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
@@ -1152,7 +1239,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data.pop('awaiting_fact_id', None)
         context.user_data.pop('awaiting_delete_user_id', None)
         context.user_data.pop('awaiting_new_fact', None)
-        await show_main_menu(update, context)
+        context.user_data.pop('awaiting_broadcast', None)
+        context.user_data.pop('broadcast_type', None)
+        await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(update, context)
         handled = True
 
     elif user_input == "Отмена":
