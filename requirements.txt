@@ -9,3 +9,4 @@ flask
 fuzzywuzzy
 python-Levenshtein
 nltk
+python-telegram-bot[job-queue]==20.7
