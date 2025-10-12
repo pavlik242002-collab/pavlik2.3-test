@@ -1,3 +1,4 @@
+```python
 from __future__ import annotations
 
 import os
@@ -6,7 +7,6 @@ import requests
 import json
 import uuid
 from datetime import datetime, timedelta
-import isoweek
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, Update
@@ -383,7 +383,7 @@ def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
 # Функции для работы с отчетами
 def create_report(report_id: str, user_id: int, questions: List[str]) -> None:
     try:
-        week_number = datetime.now().isocalendar()[1]
+        week_number = datetime.now().isocalendar().week
         year = datetime.now().year
         with conn.cursor() as cur:
             cur.execute(
@@ -1502,31 +1502,52 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('awaiting_upload', None)
             await show_main_menu(update, context)
             handled = True
-        elif user_input == 'Назад' and current_path != '/documents/':
-            parts = current_path.rstrip('/').split('/')
-            context.user_data['current_path'] = '/'.join(parts[:-1]) + '/' if len(parts) > 2 else '/documents/'
+elif user_input == 'Назад' and context.user_data.get('current_mode') == 'documents_nav':
+        current_path = context.user_data.get('current_path', '/documents/')
+        if current_path == '/documents/':
+            context.user_data.pop('current_mode', None)
+            context.user_data.pop('current_path', None)
+            context.user_data.pop('file_list', None)
+            await show_main_menu(update, context)
+        else:
+            parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
+            context.user_data['current_path'] = parent_path
             await show_current_docs(update, context, is_return=True)
-            handled = True
+        handled = True
 
-    # Если сообщение не было обработано как специальная команда или состояние, обрабатываем как запрос к AI
     if not handled:
-        logger.info(f"Обрабатываю запрос для user_id {user_id}: {user_input}")
-        ai_response = await generate_ai_response(user_id, user_input, user_name, chat_id)
-        final_response = f"{ai_response}"
-        await update.message.reply_text(final_response, reply_markup=default_reply_markup)
-        log_request(user_id, user_input, final_response)
+        if context.user_data.get('awaiting_upload', False):
+            await update.message.reply_text(
+                f"{user_name}, отправьте файл, а не текст. Поддерживаемые форматы: .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.",
+                reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
+            return
+        response = await generate_ai_response(user_id, user_input, user_name, chat_id)
+        await update.message.reply_text(response, reply_markup=default_reply_markup)
+        log_request(user_id, user_input, response)
 
-# Обработка загруженных документов
+# Обработчик документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if not context.user_data.get('awaiting_upload', False):
-        await update.message.reply_text(f"{user_name}, используйте кнопку 'Загрузить файл' перед отправкой документа.")
+    if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
+        await update.message.reply_text(f"{user_name}, у вас нет доступа.", reply_markup=ReplyKeyboardRemove())
         return
+
+    if not context.user_data.get('awaiting_upload', False):
+        await update.message.reply_text(
+            f"{user_name}, сначала выберите 'Загрузить файл' в меню.",
+            reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
+        return
+
     document = update.message.document
+    if not document:
+        await update.message.reply_text(
+            f"{user_name}, отправьте файл, а не другое сообщение.",
+            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
+        return
+
     file_name = document.file_name
-    if not file_name.lower().endswith(
-            ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.cdr', '.eps', '.png', '.jpg.', 'jpeg')):
+    if not file_name.lower().endswith(('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.cdr', '.eps', '.png', '.jpg', '.jpeg')):
         await update.message.reply_text(
             f"{user_name}, поддерживаются только файлы .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.",
             reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
