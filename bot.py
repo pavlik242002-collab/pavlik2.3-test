@@ -787,7 +787,7 @@ async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
     keyboard = [
-        ['Рассылка пользователям', 'Рассылка админам'],
+        ['Рассылка пользователям', 'Рассылка админам', 'Отчеты'],
         ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -998,6 +998,78 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     ]
     default_reply_markup = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = default_reply_markup
+    if context.user_data.get('awaiting_report_title', False):
+        if user_input == "Назад":
+            context.user_data.pop('awaiting_report_title', None)
+            context.user_data.pop('current_questions', None)
+            await show_broadcast_menu(update, context)
+            return
+        report_title = user_input.strip()
+        context.user_data['report_title'] = report_title
+        context.user_data.pop('awaiting_report_title', None)
+        context.user_data['awaiting_report_questions'] = True
+        context.user_data['question_index'] = 1  # Начинаем с вопроса 1
+        await update.message.reply_text(
+            f"{user_name}, введите вопрос 1 (или 'Готово' для завершения):",
+            reply_markup=ReplyKeyboardMarkup([['Готово', 'Назад']], resize_keyboard=True))
+        return
+
+    if context.user_data.get('awaiting_report_questions', False):
+        if user_input == "Назад":
+            context.user_data.pop('awaiting_report_questions', None)
+            context.user_data.pop('report_title', None)
+            context.user_data.pop('current_questions', None)
+            context.user_data.pop('question_index', None)
+            await show_broadcast_menu(update, context)
+            return
+        if user_input.lower() == "готово":
+            questions = context.user_data.get('current_questions', [])
+            if not questions:
+                await update.message.reply_text(f"{user_name}, добавьте хотя бы один вопрос.",
+                                                reply_markup=ReplyKeyboardMarkup([['Готово', 'Назад']],
+                                                                                 resize_keyboard=True))
+                return
+            # Формируем сообщение для рассылки
+            report_title = context.user_data.get('report_title', 'Отчет')
+            broadcast_message = f"{report_title}\n\n" + "\n".join([f"{i + 1}. {q}" for i, q in enumerate(questions)])
+            # Рассылка как отчет (используем существующий код)
+            report_id = str(uuid.uuid4())
+            week_number = datetime.now().isocalendar().week
+            year = datetime.now().year
+            recipients = ALLOWED_USERS.copy()  # Рассылка пользователям (можно изменить на админов)
+            sent_count = 0
+            for recipient_id in recipients:
+                if recipient_id == user_id:
+                    continue
+                try:
+                    create_report(report_id, recipient_id, questions, week_number, year)
+                    reply_markup = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")]
+                    ])
+                    await context.bot.send_message(
+                        chat_id=recipient_id,
+                        text=f"{get_user_name(recipient_id)}, заполните отчет за неделю {week_number} {year}:\n\n{broadcast_message}",
+                        reply_markup=reply_markup
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(f"Ошибка отправки отчета пользователю {recipient_id}: {str(e)}")
+            await update.message.reply_text(f"{user_name}, отчет '{report_title}' отправлен {sent_count} получателям.",
+                                            reply_markup=default_reply_markup)
+            # Очищаем данные
+            context.user_data.pop('awaiting_report_questions', None)
+            context.user_data.pop('report_title', None)
+            context.user_data.pop('current_questions', None)
+            context.user_data.pop('question_index', None)
+            return
+        # Добавляем вопрос в список
+        question = user_input.strip()
+        context.user_data['current_questions'].append(question)
+        context.user_data['question_index'] += 1
+        await update.message.reply_text(
+            f"{user_name}, введите вопрос {context.user_data['question_index']} (или 'Готово' для завершения):",
+            reply_markup=ReplyKeyboardMarkup([['Готово', 'Назад']], resize_keyboard=True))
+        return
 
     if context.user_data.get('awaiting_broadcast', False):
         if user_id not in ALLOWED_ADMINS:
@@ -1322,6 +1394,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data['awaiting_broadcast'] = True
         await update.message.reply_text(
             f"{user_name}, введите текст сообщения для рассылки администраторам. Если это отчет, перечислите вопросы (каждый с новой строки):",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif user_input == "Отчеты":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут создавать отчеты.",
+                                            reply_markup=default_reply_markup)
+            return
+
+        context.user_data['awaiting_report_title'] = True
+        context.user_data['current_questions'] = []  # Список для вопросов
+        await update.message.reply_text(
+            f"{user_name}, введите название отчета (это будет заголовок, например, 'Прогнозная информация по мероприятиям на этой неделе'):",
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
