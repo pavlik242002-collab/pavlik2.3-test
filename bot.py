@@ -812,6 +812,13 @@ def log_request(user_id: int, request: str, response: str) -> None:
         conn.rollback()
 
 
+# Функция для отправки длинного текста частями
+async def send_long_text(update: Update, text: str, reply_markup=None, max_length=4096):
+    for i in range(0, len(text), max_length):
+        part = text[i:i + max_length]
+        await update.message.reply_text(part, reply_markup=reply_markup if i + max_length >= len(text) else None)
+
+
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global KNOWLEDGE_BASE, ALLOWED_USERS
@@ -1110,9 +1117,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not KNOWLEDGE_BASE:
             await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
-        facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
-        await update.message.reply_text(f"{user_name}, все факты:\n{facts_list}", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты:\n{facts_list}")
+        facts_list = f"{user_name}, все факты:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+        await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты.")
         handled = True
 
     elif user_input == "Добавить факт":
@@ -1134,13 +1141,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         if not KNOWLEDGE_BASE:
             await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
-        facts_list = "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+        facts_list = f"{user_name}, выберите ID факта для удаления:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE]) + "\n\nВведите ID:"
+        await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         context.user_data["awaiting_fact_id"] = True
-        await update.message.reply_text(
-            f"{user_name}, выберите ID факта для удаления:\n{facts_list}\n\nВведите ID:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
-        )
-        logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты:\n{facts_list}")
+        logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
         handled = True
 
     elif user_input == "Назад":
