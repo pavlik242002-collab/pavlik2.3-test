@@ -1,12 +1,6 @@
+python-telegram-bot[job-queue]
 python-dotenv
-openai
 requests
-python-telegram-bot==21.4
-duckduckgo_search
+openai
 psycopg2-binary
-psycopg2
-flask
-fuzzywuzzy
-python-Levenshtein
-nltk
-python-telegram-bot[job-queue]==20.7
+duckduckgo_search

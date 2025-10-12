@@ -58,7 +58,6 @@ client = OpenAI(
 def init_db(conn):
     try:
         with conn.cursor() as cur:
-            # Проверка и создание таблицы allowed_admins
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -76,7 +75,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_admins уже существует.")
 
-            # Проверка и создание таблицы allowed_users
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -93,7 +91,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица allowed_users уже существует.")
 
-            # Проверка и создание таблицы user_profiles
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -113,7 +110,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица user_profiles уже существует.")
 
-            # Проверка и создание таблицы request_logs
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -134,7 +130,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица request_logs уже существует.")
 
-            # Проверка и создание таблицы knowledge_base
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -154,7 +149,6 @@ def init_db(conn):
             else:
                 logger.info("Таблица knowledge_base уже существует.")
 
-            # Проверка и создание таблицы reports
             cur.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
@@ -174,8 +168,7 @@ def init_db(conn):
                         status VARCHAR(20) DEFAULT 'pending',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        reminder_sent_at TIMESTAMP,
-                        UNIQUE (report_id, user_id)
+                        reminder_sent_at TIMESTAMP
                     );
                 """)
                 logger.info("Таблица reports создана.")
@@ -338,7 +331,7 @@ def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
         logger.error(f"Ошибка при сохранении user_profiles: {str(e)}")
         conn.rollback()
 
-# Функции для работы с базой знаний в Postgres
+# Функции для работы с базой знаний
 def load_knowledge_base() -> List[Dict[str, Any]]:
     try:
         with conn.cursor() as cur:
@@ -379,23 +372,19 @@ def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
         logger.error(f"Ошибка при удалении факта с ID {fact_id}: {str(e)}")
         conn.rollback()
         return False
-
-# Функции для работы с отчетами
-def create_report(report_id: str, user_id: int, questions: List[str]) -> None:
+        # Функции для работы с отчетами
+def create_report(report_id: str, user_id: int, questions: List[str], week_number: int, year: int) -> None:
     try:
-        week_number = datetime.now().isocalendar().week
-        year = datetime.now().year
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO reports (report_id, user_id, week_number, year, questions, answers, status, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT (report_id, user_id) DO NOTHING
                 """,
                 (report_id, user_id, week_number, year, questions, [], 'pending')
             )
             conn.commit()
-            logger.info(f"Отчет {report_id} создан для пользователя {user_id} на неделю {week_number}/{year}")
+            logger.info(f"Отчет {report_id} создан для пользователя {user_id} на неделю {week_number} {year}")
     except Exception as e:
         logger.error(f"Ошибка при создании отчета {report_id} для {user_id}: {str(e)}")
         conn.rollback()
@@ -413,7 +402,7 @@ def update_report_answers(report_id: str, user_id: int, answers: List[str], stat
             )
             if cur.rowcount > 0:
                 conn.commit()
-                logger.info(f"Отчет {report_id} обновлен для пользователя {user_id}, статус: {status}")
+                logger.info(f"Отчет {report_id} обновлен для пользователя {user_id}")
                 return True
             return False
     except Exception as e:
@@ -452,6 +441,7 @@ def get_reports_by_week(week_number: int, year: int) -> List[Dict[str, Any]]:
                 SELECT report_id, user_id, questions, answers, status, created_at
                 FROM reports 
                 WHERE week_number = %s AND year = %s
+                ORDER BY created_at
                 """,
                 (week_number, year)
             )
@@ -475,7 +465,6 @@ def get_reports_by_week(week_number: int, year: int) -> List[Dict[str, Any]]:
 # Улучшенный поиск фактов (топ-5 релевантных)
 def find_knowledge_facts(query: str, knowledge_base: List[Dict[str, Any]]) -> List[str]:
     query_lower = query.lower().strip()
-    # Ключевые слова и синонимы для тематики ВСКС
     synonyms = {
         "вскс": ["вскс", "студенческий корпус спасателей", "спасатели"],
         "андреев": ["андреев", "алексей евгеньевич"],
@@ -486,20 +475,16 @@ def find_knowledge_facts(query: str, knowledge_base: List[Dict[str, Any]]) -> Li
     for fact in knowledge_base:
         fact_lower = fact['text'].lower()
         score = 0
-        # Точное совпадение запроса
         if query_lower in fact_lower:
             score += 3
-        # Совпадение по словам
         query_words = query_lower.split()
         score += sum(1 for word in query_words if word in fact_lower)
-        # Совпадение по синонимам
         for syn_key, syn_list in synonyms.items():
             if syn_key in query_lower:
                 score += sum(1 for syn in syn_list if syn in fact_lower)
         if score > 0:
             scores.append((score, fact['text']))
 
-    # Сортировка по релевантности, топ-5
     scores.sort(key=lambda x: x[0], reverse=True)
     matching_facts = [fact for _, fact in scores[:5]]
     logger.info(
@@ -634,16 +619,17 @@ def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str)
     except Exception as e:
         logger.error(f"Ошибка при загрузке файла {file_path}: {str(e)}")
         return False
-
-# Инициализация глобальных переменных
+        # Инициализация глобальных переменных
 ALLOWED_ADMINS = load_allowed_admins()
 ALLOWED_USERS = load_allowed_users()
 USER_PROFILES = load_user_profiles()
-KNOWLEDGE_BASE = load_knowledge_base()# Обновленный системный промпт с примерами
+KNOWLEDGE_BASE = load_knowledge_base()
+
+# Системный промпт
 system_prompt = """
 Ты — полезный чат-бот ВСКС. Всегда отвечай на русском языке, кратко, по делу. Начинай ответ с "{user_name}, ".
 
-ПРИОРИТЕТ: Используй факты из базы знаний как основной источник. Если релевантные факты предоставлены, объединяй их в coherent ответ, добавляя объяснения и предложения уточнить.
+ПРИОРИТЕТ: Используй факты из базы знаний как основной источник. Если релевантные факты предоставлены, объединяй их в связный ответ, добавляя объяснения и предложения уточнить.
 
 Примеры ответов:
 - Запрос: "кто такой Андреев Алексей?"
@@ -661,38 +647,33 @@ histories: Dict[int, Dict[str, Any]] = {}
 # Функция для генерации AI-ответа
 async def generate_ai_response(user_id: int, user_input: str, user_name: str, chat_id: int) -> str:
     global KNOWLEDGE_BASE
+    if not user_input.strip():
+        return f"{user_name}, введите корректный запрос."
     if not KNOWLEDGE_BASE:
         KNOWLEDGE_BASE = load_knowledge_base()
 
-    # Поиск релевантных фактов
     matching_facts = find_knowledge_facts(user_input, KNOWLEDGE_BASE)
-
-    # Инициализация истории
     if chat_id not in histories:
         histories[chat_id] = {"name": user_name, "messages": [
             {"role": "system", "content": system_prompt.replace("{user_name}", user_name)}]}
 
     messages = histories[chat_id]["messages"]
-
     if matching_facts:
-        # Если факты найдены: используем их как приоритет
         facts_text = "\n".join(matching_facts)
         fact_prompt = f"""
 Используй ТОЛЬКО эти релевантные факты из базы знаний для ответа на вопрос '{user_input}'.
 Факты: {facts_text}
 
-Объедини факты в coherent, информативный ответ. Добавь объяснения, структуру и предложение уточнить. 
+Объедини факты в связный, информативный ответ. Добавь объяснения, структуру и предложение уточнить. 
 Не добавляй информацию извне.
         """
         messages.append({"role": "system", "content": fact_prompt})
         logger.info(f"Генерирую ответ на основе {len(matching_facts)} фактов для user_id {user_id}")
     else:
-        # Если фактов нет, добавляем топ-10 общих фактов, если запрос о ВСКС
         if any(word in user_input.lower() for word in ["вскс", "спасатели", "корпус"]):
             top_facts = [fact['text'] for fact in KNOWLEDGE_BASE[:10]]
             facts_text = "; ".join(top_facts)
             messages.append({"role": "system", "content": f"База знаний (используй как приоритет): {facts_text}"})
-        # Веб-поиск если нужно
         need_search = any(word in user_input.lower() for word in [
             "актуальная информация", "последние новости", "найди в интернете", "поиск",
             "что такое", "информация о", "расскажи о", "найди", "поиск по", "детали о"
@@ -704,7 +685,7 @@ async def generate_ai_response(user_id: int, user_input: str, user_name: str, ch
                 if isinstance(results, list):
                     extracted_text = "\n".join(
                         [f"Источник: {r.get('title', '')}\n{r.get('body', '')}" for r in results])
-                messages.append({"role": "system", "content": f"Актуальные факты из поиска: {extracted_text}"})
+                    messages.append({"role": "system", "content": f"Актуальные факты из поиска: {extracted_text}"})
             except json.JSONDecodeError:
                 pass
 
@@ -712,7 +693,6 @@ async def generate_ai_response(user_id: int, user_input: str, user_name: str, ch
     if len(messages) > 20:
         messages = messages[:1] + messages[-19:]
 
-    # Запрос к API
     models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
     ai_response = "Извините, не удалось получить ответ от API. Проверьте подписку на SuperGrok или X Premium+."
 
@@ -737,9 +717,7 @@ async def generate_ai_response(user_id: int, user_input: str, user_name: str, ch
 # Функция для получения user_name
 def get_user_name(user_id: int) -> str:
     profile = USER_PROFILES.get(user_id)
-    if profile:
-        return profile.get("name") or "Пользователь"
-    return "Пользователь"
+    return profile.get("name") or "Пользователь" if profile else "Пользователь"
 
 # Обработчик команды /start
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -846,6 +824,28 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         await update.message.reply_text(f"{user_name}, папка {folder_name} пуста.", reply_markup=reply_markup)
 
+# Отображение файлов в папке региона
+async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    profile = USER_PROFILES.get(user_id)
+    if not profile or not profile.get('region'):
+        await update.message.reply_text(f"{user_name}, регион не указан. Обратитесь к администратору.",
+                                        reply_markup=context.user_data.get('default_reply_markup'))
+        return
+    region_folder = f"/regions/{profile['region']}/"
+    create_yandex_folder(region_folder)
+    files = list_yandex_disk_files(region_folder)
+    context.user_data['current_path'] = region_folder
+    context.user_data['file_list'] = files
+    if files:
+        file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"download:{idx}")] for idx, item in enumerate(files)]
+        reply_markup = InlineKeyboardMarkup(file_keyboard)
+        await update.message.reply_text(f"{user_name}, файлы в папке региона {profile['region']}:", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(f"{user_name}, папка региона {profile['region']} пуста.",
+                                        reply_markup=context.user_data.get('default_reply_markup'))
+
 # Обработка callback-запросов
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -907,7 +907,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.message.reply_text(f"{user_name}, ошибка при скачивании: {str(e)}. Проверьте YANDEX_TOKEN.",
                                            reply_markup=default_reply_markup)
             logger.error(f"Ошибка при отправке файла: {str(e)}")
-    if query.data.startswith("start_report:"):
+    elif query.data.startswith("start_report:"):
         report_id = query.data.split(":", 1)[1]
         try:
             with conn.cursor() as cur:
@@ -1024,30 +1024,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('broadcast_type', None)
             return
 
-        # Проверяем, является ли сообщение отчетом (содержит вопросы, разделенные переносом строки)
         questions = [q.strip() for q in broadcast_message.split('\n') if q.strip()]
-        is_report = len(questions) > 1 or any(q.startswith((str(i) + '.' for i in range(1, 10))) for q in questions)
+        is_report = len(questions) > 1 or any(q.startswith(('1.', '2.', '3.', '4.', '5.', '6.')) for q in questions)
         report_id = str(uuid.uuid4()) if is_report else None
+        week_number = datetime.now().isocalendar().week
+        year = datetime.now().year
 
         sent_count = 0
         for recipient_id in recipients:
-            if recipient_id == user_id:  # Не отправляем самому себе
+            if recipient_id == user_id:
                 continue
             try:
                 if is_report:
-                    # Создаем запись отчета для пользователя
-                    create_report(report_id, recipient_id, questions)
-                    # Отправляем сообщение с кнопкой "Заполнить отчет"
+                    create_report(report_id, recipient_id, questions, week_number, year)
                     reply_markup = InlineKeyboardMarkup([
                         [InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")]
                     ])
                     await context.bot.send_message(
                         chat_id=recipient_id,
-                        text=f"{get_user_name(recipient_id)}, заполните отчет:\n\n{broadcast_message}",
+                        text=f"{get_user_name(recipient_id)}, заполните отчет за неделю {week_number} {year}:\n\n{broadcast_message}",
                         reply_markup=reply_markup
                     )
                 else:
-                    # Обычная рассылка без отчета
                     await context.bot.send_message(chat_id=recipient_id, text=broadcast_message)
                 sent_count += 1
             except Exception as e:
@@ -1214,25 +1212,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                         reply_markup=default_reply_markup)
         return
 
-    if 'current_report_id' in context.user_data:
+    if context.user_data.get('current_report_id', False):
         if user_input == "Отмена":
             context.user_data.pop('current_report_id', None)
             context.user_data.pop('current_question_index', None)
             context.user_data.pop('current_answers', None)
             await show_main_menu(update, context)
             return
-        else:
-            report_id = context.user_data['current_report_id']
-            question_index = context.user_data['current_question_index']
-            answers = context.user_data['current_answers']
-            answers.append(user_input.strip())
-            try:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT questions FROM reports WHERE report_id = %s AND user_id = %s",
-                                (report_id, user_id))
-                    questions = cur.fetchone()[0]
+        report_id = context.user_data['current_report_id']
+        question_index = context.user_data['current_question_index']
+        answers = context.user_data['current_answers']
+        answers.append(user_input.strip())
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT questions FROM reports WHERE report_id = %s AND user_id = %s",
+                            (report_id, user_id))
+                questions = cur.fetchone()[0]
                 if question_index + 1 < len(questions):
-                    # Следующий вопрос
                     context.user_data['current_question_index'] += 1
                     context.user_data['current_answers'] = answers
                     update_report_answers(report_id, user_id, answers, 'in_progress')
@@ -1242,7 +1238,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
                     )
                 else:
-                    # Все вопросы завершены
                     update_report_answers(report_id, user_id, answers, 'completed')
                     context.user_data.pop('current_report_id', None)
                     context.user_data.pop('current_question_index', None)
@@ -1252,17 +1247,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         reply_markup=default_reply_markup
                     )
                     logger.info(f"Отчет {report_id} заполнен пользователем {user_id}")
-                return
-            except Exception as e:
-                logger.error(f"Ошибка при обработке ответа на отчет {report_id}: {str(e)}")
-                await update.message.reply_text(
-                    f"{user_name}, ошибка при сохранении ответа. Попробуйте снова.",
-                    reply_markup=default_reply_markup
-                )
-                context.user_data.pop('current_report_id', None)
-                context.user_data.pop('current_question_index', None)
-                context.user_data.pop('current_answers', None)
-                return
+        except Exception as e:
+            logger.error(f"Ошибка при обработке ответа на отчет {report_id}: {str(e)}")
+            await update.message.reply_text(
+                f"{user_name}, ошибка при сохранении ответа. Попробуйте снова.",
+                reply_markup=default_reply_markup
+            )
+            context.user_data.pop('current_report_id', None)
+            context.user_data.pop('current_question_index', None)
+            context.user_data.pop('current_answers', None)
+            return
 
     if user_input == "Загрузить файл":
         context.user_data["awaiting_upload"] = True
@@ -1478,130 +1472,131 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         context.user_data.pop('awaiting_new_fact', None)
         context.user_data.pop('awaiting_broadcast', None)
         context.user_data.pop('broadcast_type', None)
-        await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(update, context)
+        if context.user_data.get('current_mode') == 'documents_nav':
+            current_path = context.user_data.get('current_path', '/documents/')
+            if current_path == '/documents/':
+                context.user_data.pop('current_mode', None)
+                context.user_data.pop('current_path', None)
+                context.user_data.pop('file_list', None)
+                await show_main_menu(update, context)
+            else:
+                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
+                context.user_data['current_path'] = parent_path
+                await show_current_docs(update, context, is_return=True)
+        else:
+            await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(update, context)
         return
 
     elif user_input == "Отмена":
         context.user_data.pop('awaiting_upload', None)
+        context.user_data.pop('current_report_id', None)
+        context.user_data.pop('current_question_index', None)
+        context.user_data.pop('current_answers', None)
         await show_main_menu(update, context)
         return
 
-    elif user_input == 'Назад' and context.user_data.get('current_mode') == 'documents_nav':
+    elif context.user_data.get('current_mode') == 'documents_nav':
         current_path = context.user_data.get('current_path', '/documents/')
-        if current_path == '/documents/':
+        if user_input == "В главное меню":
             context.user_data.pop('current_mode', None)
             context.user_data.pop('current_path', None)
             context.user_data.pop('file_list', None)
             await show_main_menu(update, context)
+            return
+        elif user_input == "Назад":
+            if current_path == '/documents/':
+                context.user_data.pop('current_mode', None)
+                context.user_data.pop('current_path', None)
+                context.user_data.pop('file_list', None)
+                await show_main_menu(update, context)
+            else:
+                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
+                context.user_data['current_path'] = parent_path
+                await show_current_docs(update, context, is_return=True)
+            return
         else:
-            parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
-            context.user_data['current_path'] = parent_path
-            await show_current_docs(update, context, is_return=True)
-        return
+            new_path = f"{current_path.rstrip('/')}/{user_input}/"
+            if create_yandex_folder(new_path):
+                context.user_data['current_path'] = new_path
+                await show_current_docs(update, context)
+            else:
+                await update.message.reply_text(
+                    f"{user_name}, ошибка при переходе в папку {user_input}.",
+                    reply_markup=default_reply_markup
+                )
+            return
 
-    if context.user_data.get('awaiting_upload', False):
-        await update.message.reply_text(
-            f"{user_name}, отправьте файл, а не текст. Поддерживаемые форматы: .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.",
-            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
-        return
-    response = await generate_ai_response(user_id, user_input, user_name, chat_id)
-    await update.message.reply_text(response, reply_markup=default_reply_markup)
-    log_request(user_id, user_input, response)
+    else:
+        response = await generate_ai_response(user_id, user_input, user_name, chat_id)
+        log_request(user_id, user_input, response)
+        await send_long_text(update, response, reply_markup=default_reply_markup)
 
-# Обработчик документов
+# Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_USERS and user_id not in ALLOWED_ADMINS:
-        await update.message.reply_text(f"{user_name}, у вас нет доступа.", reply_markup=ReplyKeyboardRemove())
-        return
+    default_reply_markup = context.user_data.get('default_reply_markup', ReplyKeyboardRemove())
 
     if not context.user_data.get('awaiting_upload', False):
         await update.message.reply_text(
             f"{user_name}, сначала выберите 'Загрузить файл' в меню.",
-            reply_markup=context.user_data.get('default_reply_markup', ReplyKeyboardRemove()))
+            reply_markup=default_reply_markup
+        )
+        return
+
+    if user_id not in USER_PROFILES or not USER_PROFILES[user_id].get('region'):
+        await update.message.reply_text(
+            f"{user_name}, регион не указан. Обратитесь к администратору.",
+            reply_markup=default_reply_markup
+        )
+        context.user_data.pop('awaiting_upload', None)
         return
 
     document = update.message.document
     if not document:
         await update.message.reply_text(
-            f"{user_name}, отправьте файл, а не другое сообщение.",
-            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
+            f"{user_name}, пожалуйста, отправьте файл.",
+            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
+        )
         return
 
     file_name = document.file_name
-    if not file_name.lower().endswith(
-            ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.cdr', '.eps', '.png', '.jpg', '.jpeg')):
+    supported_extensions = ('.pdf', '.doc', '.docx', '.xls', '.xlsx', '.cdr', '.eps', '.png', '.jpg', '.jpeg')
+    if not file_name.lower().endswith(supported_extensions):
         await update.message.reply_text(
-            f"{user_name}, поддерживаются только файлы .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.",
-            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
+            f"{user_name}, поддерживаются только файлы: .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg.",
+            reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
+        )
         return
 
-    profile = USER_PROFILES.get(user_id)
-    if not profile or "region" not in profile:
-        await update.message.reply_text(f"{user_name}, ошибка: регион не определён.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        return
+    try:
+        file = await document.get_file()
+        file_content = await file.download_as_bytearray()
+        region = USER_PROFILES[user_id]['region']
+        folder_path = f"/regions/{region}/"
+        create_yandex_folder(folder_path)
+        if upload_to_yandex_disk(file_content, file_name, folder_path):
+            await update.message.reply_text(
+                f"{user_name}, файл {file_name} успешно загружен в папку региона {region}.",
+                reply_markup=default_reply_markup
+            )
+            logger.info(f"Файл {file_name} загружен пользователем {user_id} в {folder_path}")
+        else:
+            await update.message.reply_text(
+                f"{user_name}, ошибка при загрузке файла. Проверьте YANDEX_TOKEN.",
+                reply_markup=default_reply_markup
+            )
+            logger.error(f"Ошибка при загрузке файла {file_name} пользователем {user_id}")
+        context.user_data.pop('awaiting_upload', None)
+    except Exception as e:
+        logger.error(f"Ошибка при обработке документа от {user_id}: {str(e)}")
+        await update.message.reply_text(
+            f"{user_name}, ошибка при загрузке файла: {str(e)}.",
+            reply_markup=default_reply_markup
+        )
+        context.user_data.pop('awaiting_upload', None)
 
-    file = await document.get_file()
-    file_content = await file.download_as_bytearray()
-
-    if len(file_content) / (1024 * 1024) > 20:
-        await update.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).",
-                                        reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
-        return
-
-    region_folder = f"/regions/{profile['region']}/"
-    if not create_yandex_folder(region_folder):
-        await update.message.reply_text(f"{user_name}, ошибка: не удалось создать папку для региона.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        return
-
-    if upload_to_yandex_disk(file_content, file_name, region_folder):
-        await update.message.reply_text(f"{user_name}, файл '{file_name}' успешно загружен в папку региона.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        logger.info(f"Файл {file_name} загружен пользователем {user_id} в {region_folder}")
-    else:
-        await update.message.reply_text(f"{user_name}, ошибка при загрузке файла. Проверьте YANDEX_TOKEN.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        logger.error(f"Ошибка загрузки файла {file_name} пользователем {user_id}")
-
-    context.user_data.pop('awaiting_upload', None)
-
-# Функция для отображения списка файлов региона
-async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id: int = update.effective_user.id
-    user_name = get_user_name(user_id)
-    profile = USER_PROFILES.get(user_id)
-    if not profile or "region" not in profile:
-        await update.message.reply_text(f"{user_name}, ошибка: регион не определён.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        return
-
-    region_folder = f"/regions/{profile['region']}/"
-    create_yandex_folder(region_folder)
-    files = list_yandex_disk_files(region_folder)
-    context.user_data['file_list'] = files
-    context.user_data['current_path'] = region_folder
-
-    if not files:
-        await update.message.reply_text(f"{user_name}, в папке вашего региона нет файлов.",
-                                        reply_markup=context.user_data.get('default_reply_markup',
-                                                                           ReplyKeyboardRemove()))
-        return
-
-    file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"download:{idx}")] for idx, item in
-                     enumerate(files)]
-    file_reply_markup = InlineKeyboardMarkup(file_keyboard)
-    await update.message.reply_text(f"{user_name}, файлы вашего региона:", reply_markup=file_reply_markup)
-    logger.info(f"Показан список файлов для региона {profile['region']} пользователю {user_id}")
-
-# Функция для проверки и отправки напоминаний
+# Функция для проверки и отправки напоминаний о просроченных отчетах
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     overdue_reports = check_overdue_reports()
     for report in overdue_reports:
@@ -1621,25 +1616,24 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             ])
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"{user_name}, напоминание: пожалуйста, заполните отчет:\n\n" + "\n".join(questions),
+                text=f"{user_name}, напоминание: вы не заполнили отчет за неделю {datetime.now().isocalendar().week} {datetime.now().year}:\n\n" + "\n".join(questions),
                 reply_markup=reply_markup
             )
             logger.info(f"Напоминание отправлено пользователю {user_id} для отчета {report_id}")
         except Exception as e:
-            logger.error(
-                f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
+            logger.error(f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
 
-# Главная функция
-def main():
+# Основная функция запуска бота
+def main() -> None:
     try:
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        app.add_handler(CommandHandler("start", send_welcome))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-        app.add_handler(CallbackQueryHandler(handle_callback_query))
-        # Добавляем фоновую задачу для проверки напоминаний каждые 6 часов
-        app.job_queue.run_repeating(check_reminders, interval=6 * 60 * 60, first=10)
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
+        application.add_handler(CommandHandler("start", send_welcome))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+        application.add_handler(CallbackQueryHandler(handle_callback_query))
+        application.job_queue.run_repeating(check_reminders, interval=21600, first=60)  # Каждые 6 часов
+        logger.info("Бот запущен, начинаю polling...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
