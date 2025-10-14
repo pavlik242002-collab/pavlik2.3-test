@@ -464,6 +464,62 @@ def get_reports_by_week(week_number: int, year: int) -> List[Dict[str, Any]]:
         logger.error(f"Ошибка при получении отчетов за неделю {week_number} {year}: {str(e)}")
         return []
 
+
+def export_users_to_excel() -> BytesIO:
+    """
+    Выгружает данные зарегистрированных пользователей в Excel-файл.
+
+    Returns:
+        BytesIO: Поток данных Excel-файла.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, fio, region FROM user_profiles")
+            users = [{"ID": row[0], "ФИО": row[1] or "Не указано", "Регион": row[2] or "Не указано"} for row in
+                     cur.fetchall()]
+        df = pd.DataFrame(users)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Пользователи')
+        output.seek(0)
+        logger.info("Данные пользователей успешно выгружены в Excel")
+        return output
+    except Exception as e:
+        logger.error(f"Ошибка при выгрузке пользователей в Excel: {str(e)}")
+        raise
+
+
+def export_admins_to_excel() -> BytesIO:
+    """
+    Выгружает данные администраторов в Excel-файл.
+
+    Returns:
+        BytesIO: Поток данных Excel-файла.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM allowed_admins")
+            admin_ids = [row[0] for row in cur.fetchall()]
+            admins = []
+            for admin_id in admin_ids:
+                cur.execute("SELECT fio, region FROM user_profiles WHERE user_id = %s", (admin_id,))
+                profile = cur.fetchone()
+                admins.append({
+                    "ID": admin_id,
+                    "ФИО": profile[0] if profile and profile[0] else "Не указано",
+                    "Регион": profile[1] if profile and profile[1] else "Не указано"
+                })
+        df = pd.DataFrame(admins)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Администраторы')
+        output.seek(0)
+        logger.info("Данные администраторов успешно выгружены в Excel")
+        return output
+    except Exception as e:
+        logger.error(f"Ошибка при выгрузке администраторов в Excel: {str(e)}")
+        raise
+
 # Улучшенный поиск фактов (топ-5 релевантных)
 def find_knowledge_facts(query: str, knowledge_base: List[Dict[str, Any]]) -> List[str]:
     query_lower = query.lower().strip()
@@ -770,19 +826,21 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # Отображение меню управления пользователями
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id: int = update.effective_user.id
-    user_name = get_user_name(user_id)
-    keyboard = [
-        ['Добавить пользователя', 'Добавить администратора'],
-        ['Список пользователей', 'Список администраторов'],
-        ['Удалить пользователя', 'Удалить файл'],
-        ['Все факты (с ID)', 'Добавить факт'],
-        ['Удалить факт', 'Рассылка'],
-        ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
-        ['Назад']
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+    async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id: int = update.effective_user.id
+        user_name = get_user_name(user_id)
+        keyboard = [
+            ['Добавить пользователя', 'Добавить администратора'],
+            ['Список пользователей', 'Список администраторов'],
+            ['Удалить пользователя', 'Удалить файл'],
+            ['Все факты (с ID)', 'Добавить факт'],
+            ['Удалить факт', 'Рассылка'],
+            ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
+            ['Выгрузить пользователей в Excel', 'Выгрузить администраторов в Excel'],
+            ['Назад']
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение меню рассылки
 async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1562,6 +1620,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(
             f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif user_input == "Выгрузить пользователей в Excel":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные пользователей.",
+                                            reply_markup=default_reply_markup)
+            return
+        try:
+            output = export_users_to_excel()
+            file_name = f"users_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            await update.message.reply_document(
+                document=InputFile(output, filename=file_name),
+                caption=f"{user_name}, данные пользователей выгружены в Excel."
+            )
+            logger.info(f"Данные пользователей выгружены в Excel для админа {user_id}")
+            await show_admin_menu(update, context)
+        except Exception as e:
+            logger.error(f"Ошибка при выгрузке пользователей для админа {user_id}: {str(e)}")
+            await update.message.reply_text(
+                f"{user_name}, ошибка при выгрузке данных пользователей: {str(e)}.",
+                reply_markup=default_reply_markup
+            )
+        return
+
+    elif user_input == "Выгрузить администраторов в Excel":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(
+                f"{user_name}, только администраторы могут выгружать данные администраторов.",
+                reply_markup=default_reply_markup)
+            return
+        try:
+            output = export_admins_to_excel()
+            file_name = f"admins_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            await update.message.reply_document(
+                document=InputFile(output, filename=file_name),
+                caption=f"{user_name}, данные администраторов выгружены в Excel."
+            )
+            logger.info(f"Данные администраторов выгружены в Excel для админа {user_id}")
+            await show_admin_menu(update, context)
+        except Exception as e:
+            logger.error(f"Ошибка при выгрузке администраторов для админа {user_id}: {str(e)}")
+            await update.message.reply_text(
+                f"{user_name}, ошибка при выгрузке данных администраторов: {str(e)}.",
+                reply_markup=default_reply_markup
+            )
         return
 
     elif context.user_data.get("awaiting_export_week", False):
