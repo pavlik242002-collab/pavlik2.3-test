@@ -9,8 +9,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, \
-    JobQueue
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, JobQueue
 from telegram import InputFile
 from urllib.parse import quote
 from openai import OpenAI
@@ -56,7 +55,6 @@ client = OpenAI(
     base_url="https://api.x.ai/v1",
     api_key=XAI_TOKEN,
 )
-
 
 # Инициализация таблиц в PostgreSQL
 def init_db(conn):
@@ -186,7 +184,6 @@ def init_db(conn):
         conn.rollback()
         raise
 
-
 init_db(conn)
 
 # Словарь федеральных округов
@@ -235,7 +232,6 @@ FEDERAL_DISTRICTS = {
     ]
 }
 
-
 # Функции для работы с администраторами
 def load_allowed_admins() -> List[int]:
     try:
@@ -253,7 +249,6 @@ def load_allowed_admins() -> List[int]:
         conn.rollback()
         return [6909708460]
 
-
 def save_allowed_admins(allowed_admins: List[int]) -> None:
     try:
         with conn.cursor() as cur:
@@ -265,7 +260,6 @@ def save_allowed_admins(allowed_admins: List[int]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении allowed_admins: {str(e)}")
         conn.rollback()
-
 
 # Функции для работы с пользователями
 def load_allowed_users() -> List[int]:
@@ -280,7 +274,6 @@ def load_allowed_users() -> List[int]:
         conn.rollback()
         return []
 
-
 def save_allowed_users(allowed_users: List[int]) -> None:
     try:
         with conn.cursor() as cur:
@@ -292,7 +285,6 @@ def save_allowed_users(allowed_users: List[int]) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении allowed_users: {str(e)}")
         conn.rollback()
-
 
 def delete_allowed_user(user_id_to_delete: int, admin_id: int) -> bool:
     try:
@@ -311,7 +303,6 @@ def delete_allowed_user(user_id_to_delete: int, admin_id: int) -> bool:
         conn.rollback()
         return False
 
-
 # Функции для профилей пользователей
 def load_user_profiles() -> Dict[int, Dict[str, str]]:
     try:
@@ -326,7 +317,6 @@ def load_user_profiles() -> Dict[int, Dict[str, str]]:
         logger.error(f"Ошибка при загрузке user_profiles: {str(e)}")
         conn.rollback()
         return {}
-
 
 def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
     try:
@@ -343,7 +333,6 @@ def save_user_profiles(profiles: Dict[int, Dict[str, str]]) -> None:
         logger.error(f"Ошибка при сохранении user_profiles: {str(e)}")
         conn.rollback()
 
-
 # Функции для работы с базой знаний
 def load_knowledge_base() -> List[Dict[str, Any]]:
     try:
@@ -357,7 +346,6 @@ def load_knowledge_base() -> List[Dict[str, Any]]:
         conn.rollback()
         return []
 
-
 def save_knowledge_fact(fact: str, added_by: int) -> None:
     try:
         with conn.cursor() as cur:
@@ -370,7 +358,6 @@ def save_knowledge_fact(fact: str, added_by: int) -> None:
     except Exception as e:
         logger.error(f"Ошибка при сохранении факта в knowledge_base: {str(e)}")
         conn.rollback()
-
 
 def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
     try:
@@ -388,8 +375,6 @@ def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
         conn.rollback()
         return False
         # Функции для работы с отчетами
-
-
 def create_report(report_id: str, user_id: int, questions: List[str], week_number: int, year: int) -> None:
     try:
         with conn.cursor() as cur:
@@ -405,7 +390,6 @@ def create_report(report_id: str, user_id: int, questions: List[str], week_numbe
     except Exception as e:
         logger.error(f"Ошибка при создании отчета {report_id} для {user_id}: {str(e)}")
         conn.rollback()
-
 
 def update_report_answers(report_id: str, user_id: int, answers: List[str], status: str = 'in_progress') -> bool:
     try:
@@ -427,7 +411,6 @@ def update_report_answers(report_id: str, user_id: int, answers: List[str], stat
         logger.error(f"Ошибка при обновлении отчета {report_id} для {user_id}: {str(e)}")
         conn.rollback()
         return False
-
 
 def check_overdue_reports() -> List[Dict[str, Any]]:
     try:
@@ -451,7 +434,6 @@ def check_overdue_reports() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Ошибка при проверке просроченных отчетов: {str(e)}")
         return []
-
 
 def get_reports_by_week(week_number: int, year: int) -> List[Dict[str, Any]]:
     try:
@@ -538,7 +520,6 @@ def export_admins_to_excel() -> BytesIO:
         logger.error(f"Ошибка при выгрузке администраторов в Excel: {str(e)}")
         raise
 
-
 # Улучшенный поиск фактов (топ-5 релевантных)
 def find_knowledge_facts(query: str, knowledge_base: List[Dict[str, Any]]) -> List[str]:
     query_lower = query.lower().strip()
@@ -568,7 +549,6 @@ def find_knowledge_facts(query: str, knowledge_base: List[Dict[str, Any]]) -> Li
         f"Найдено {len(matching_facts)} релевантных фактов для '{query}': {[f[:50] + '...' for f in matching_facts]}")
     return matching_facts
 
-
 # Функция для веб-поиска
 def web_search(query: str) -> str:
     cache_file = 'search_cache.json'
@@ -596,7 +576,6 @@ def web_search(query: str) -> str:
     except Exception as e:
         logger.error(f"Ошибка при поиске: {str(e)}")
         return json.dumps({"error": "Не удалось выполнить поиск."}, ensure_ascii=False)
-
 
 # Функции для работы с Яндекс.Диском
 def create_yandex_folder(folder_path: str) -> bool:
@@ -627,7 +606,6 @@ def create_yandex_folder(folder_path: str) -> bool:
         logger.error(f"Ошибка при создании/проверке папки {folder_path}: {str(e)}")
         return False
 
-
 def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict[str, str]]:
     folder_path = folder_path.rstrip('/')
     url = f'https://cloud-api.yandex.net/v1/disk/resources?path={quote(folder_path)}&fields=_embedded.items.name,_embedded.items.type,_embedded.items.path&limit=100'
@@ -648,11 +626,9 @@ def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict
         logger.error(f"Ошибка при запросе списка элементов: {str(e)}")
         return []
 
-
 def list_yandex_disk_directories(folder_path: str) -> List[str]:
     items = list_yandex_disk_items(folder_path, item_type='dir')
     return [item['name'] for item in items]
-
 
 def list_yandex_disk_files(folder_path: str) -> List[Dict[str, str]]:
     folder_path = folder_path.rstrip('/')
@@ -661,7 +637,6 @@ def list_yandex_disk_files(folder_path: str) -> List[Dict[str, str]]:
     files = [item for item in items if item['name'].lower().endswith(supported_extensions)]
     logger.info(f"Найдено {len(files)} файлов в папке {folder_path}")
     return files
-
 
 def get_yandex_disk_file(file_path: str) -> str | None:
     file_path = file_path.rstrip('/')
@@ -680,7 +655,6 @@ def get_yandex_disk_file(file_path: str) -> str | None:
     except Exception as e:
         logger.error(f"Ошибка при запросе файла {file_path}: {str(e)}")
         return None
-
 
 def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str) -> bool:
     folder_path = folder_path.rstrip('/')
@@ -704,8 +678,6 @@ def upload_to_yandex_disk(file_content: bytes, file_name: str, folder_path: str)
         logger.error(f"Ошибка при загрузке файла {file_path}: {str(e)}")
         return False
         # Инициализация глобальных переменных
-
-
 ALLOWED_ADMINS = load_allowed_admins()
 ALLOWED_USERS = load_allowed_users()
 USER_PROFILES = load_user_profiles()
@@ -729,7 +701,6 @@ system_prompt = """
 
 # Сохранение истории переписки
 histories: Dict[int, Dict[str, Any]] = {}
-
 
 # Функция для генерации AI-ответа
 async def generate_ai_response(user_id: int, user_input: str, user_name: str, chat_id: int) -> str:
@@ -801,12 +772,10 @@ async def generate_ai_response(user_id: int, user_input: str, user_name: str, ch
     histories[chat_id]["messages"].append({"role": "assistant", "content": ai_response})
     return ai_response
 
-
 # Функция для получения user_name
 def get_user_name(user_id: int) -> str:
     profile = USER_PROFILES.get(user_id)
     return profile.get("name") or "Пользователь" if profile else "Пользователь"
-
 
 # Обработчик команды /start
 async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -827,7 +796,6 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                                         reply_markup=ReplyKeyboardRemove())
     else:
         await show_main_menu(update, context)
-
 
 # Отображение главного меню
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -856,25 +824,22 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('awaiting_report_week', None)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
-
 # Отображение меню управления пользователями
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user_id: int = update.effective_user.id
-        user_name = get_user_name(user_id)
-        keyboard = [
-            ['Добавить пользователя', 'Добавить администратора'],
-            ['Список пользователей', 'Список администраторов'],
-            ['Удалить пользователя', 'Удалить файл'],
-            ['Все факты (с ID)', 'Добавить факт'],
-            ['Удалить факт', 'Рассылка'],
-            ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
-            ['Выгрузить пользователей в Excel', 'Выгрузить администраторов в Excel'],
-            ['Назад']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
-
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Добавить пользователя', 'Добавить администратора'],
+        ['Список пользователей', 'Список администраторов'],
+        ['Удалить пользователя', 'Удалить файл'],
+        ['Все факты (с ID)', 'Добавить факт'],
+        ['Удалить факт', 'Рассылка'],
+        ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
+        ['Выгрузить пользователей в Excel', 'Выгрузить администраторов в Excel'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение меню рассылки
 async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -886,7 +851,6 @@ async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(f"{user_name}, выберите тип рассылки:", reply_markup=reply_markup)
-
 
 # Отображение содержимого папки в /documents/
 async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
@@ -919,7 +883,6 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         await update.message.reply_text(f"{user_name}, папка {folder_name} пуста.", reply_markup=reply_markup)
 
-
 # Отображение файлов в папке региона
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
@@ -935,15 +898,12 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data['current_path'] = region_folder
     context.user_data['file_list'] = files
     if files:
-        file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"download:{idx}")] for idx, item in
-                         enumerate(files)]
+        file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"download:{idx}")] for idx, item in enumerate(files)]
         reply_markup = InlineKeyboardMarkup(file_keyboard)
-        await update.message.reply_text(f"{user_name}, файлы в папке региона {profile['region']}:",
-                                        reply_markup=reply_markup)
+        await update.message.reply_text(f"{user_name}, файлы в папке региона {profile['region']}:", reply_markup=reply_markup)
     else:
         await update.message.reply_text(f"{user_name}, папка региона {profile['region']} пуста.",
                                         reply_markup=context.user_data.get('default_reply_markup'))
-
 
 # Обработка callback-запросов
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1037,7 +997,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             await query.message.reply_text(f"{user_name}, ошибка при начале заполнения отчета.",
                                            reply_markup=default_reply_markup)
 
-
 # Функция для логирования запросов
 def log_request(user_id: int, request: str, response: str) -> None:
     try:
@@ -1052,13 +1011,11 @@ def log_request(user_id: int, request: str, response: str) -> None:
         logger.error(f"Ошибка при логировании запроса: {str(e)}")
         conn.rollback()
 
-
 # Функция для отправки длинного текста частями
 async def send_long_text(update: Update, text: str, reply_markup=None, max_length=4096):
     for i in range(0, len(text), max_length):
         part = text[i:i + max_length]
         await update.message.reply_text(part, reply_markup=reply_markup if i + max_length >= len(text) else None)
-
 
 # Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1578,11 +1535,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         context.user_data.pop('awaiting_upload', None)
         if not KNOWLEDGE_BASE:
-            await update.message.reply_text(f"{user_name}, база знаний пуста.",
-                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
-        facts_list = f"{user_name}, все факты:\n" + "\n".join(
-            [f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+        facts_list = f"{user_name}, все факты:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
         await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты.")
         return
@@ -1594,8 +1549,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         context.user_data["awaiting_new_fact"] = True
         context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(f"{user_name}, введите текст нового факта:",
-                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        await update.message.reply_text(f"{user_name}, введите текст нового факта:", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
     elif user_input == "Удалить факт":
@@ -1605,11 +1559,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
         context.user_data.pop('awaiting_upload', None)
         if not KNOWLEDGE_BASE:
-            await update.message.reply_text(f"{user_name}, база знаний пуста.",
-                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             return
-        facts_list = f"{user_name}, выберите ID факта для удаления:\n" + "\n".join(
-            [f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE]) + "\n\nВведите ID:"
+        facts_list = f"{user_name}, выберите ID факта для удаления:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE]) + "\n\nВведите ID:"
         await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         context.user_data["awaiting_fact_id"] = True
         logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
@@ -1668,7 +1620,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
-
     elif user_input == "Выгрузить пользователей в Excel":
         if user_id not in ALLOWED_ADMINS:
             await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные пользователей.",
@@ -1786,8 +1737,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 context.user_data['current_path'] = parent_path
                 await show_current_docs(update, context, is_return=True)
         else:
-            await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(
-                update, context)
+            await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(update, context)
         return
 
     elif user_input == "Отмена":
@@ -1833,7 +1783,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
         log_request(user_id, user_input, response)
         await send_long_text(update, response, reply_markup=default_reply_markup)
-
 
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1900,7 +1849,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         context.user_data.pop('awaiting_upload', None)
 
-
 # Функция для проверки и отправки напоминаний о просроченных отчетах
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     overdue_reports = check_overdue_reports()
@@ -1921,14 +1869,12 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             ])
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"{user_name}, напоминание: вы не заполнили отчет за неделю {datetime.now().isocalendar().week} {datetime.now().year}:\n\n" + "\n".join(
-                    questions),
+                text=f"{user_name}, напоминание: вы не заполнили отчет за неделю {datetime.now().isocalendar().week} {datetime.now().year}:\n\n" + "\n".join(questions),
                 reply_markup=reply_markup
             )
             logger.info(f"Напоминание отправлено пользователю {user_id} для отчета {report_id}")
         except Exception as e:
             logger.error(f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
-
 
 # Основная функция запуска бота
 def main() -> None:
@@ -1944,7 +1890,6 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
-
 
 if __name__ == '__main__':
     main()
