@@ -177,6 +177,16 @@ def init_db(conn):
             else:
                 logger.info("Таблица reports уже существует.")
 
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS broadcasts (
+                        broadcast_id SERIAL PRIMARY KEY,
+                        admin_id BIGINT NOT NULL,
+                        broadcast_type TEXT NOT NULL,
+                        message_text TEXT,
+                        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """)
+
             conn.commit()
             logger.info("Все таблицы проверены и созданы при необходимости.")
     except Exception as e:
@@ -826,31 +836,155 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # Отображение меню управления пользователями
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает главное меню администратора.
+    """
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
     keyboard = [
-        ['Добавить пользователя', 'Добавить администратора'],
-        ['Список пользователей', 'Список администраторов'],
-        ['Удалить пользователя', 'Удалить файл'],
-        ['Все факты (с ID)', 'Добавить факт'],
-        ['Удалить факт', 'Рассылка'],
-        ['Просмотреть отчеты', 'Выгрузить отчеты в Excel'],
-        ['Выгрузить пользователей в Excel', 'Выгрузить администраторов в Excel'],
+        ['Управление пользователями'],
+        ['Управление фактами'],
+        ['Отчеты'],
+        ['Рассылки'],
+        ['Файлы из папок'],
         ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
-# Отображение меню рассылки
-async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+def export_broadcasts_to_excel() -> BytesIO:
+    """
+    Выгружает данные о рассылках в Excel-файл.
+
+    Returns:
+        BytesIO: Поток данных Excel-файла.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT broadcast_id, admin_id, broadcast_type, message_text, sent_at FROM broadcasts")
+            broadcasts = [
+                {
+                    "ID рассылки": row[0],
+                    "ID администратора": row[1],
+                    "Тип рассылки": row[2],
+                    "Текст сообщения": row[3] or "Не указано",
+                    "Время отправки": row[4].strftime('%Y-%m-%d %H:%M:%S')
+                }
+                for row in cur.fetchall()
+            ]
+        df = pd.DataFrame(broadcasts)
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Рассылки')
+        output.seek(0)
+        logger.info("Данные рассылок успешно выгружены в Excel")
+        return output
+    except Exception as e:
+        logger.error(f"Ошибка при выгрузке рассылок в Excel: {str(e)}")
+        raise
+
+
+async def send_broadcast(context: ContextTypes.DEFAULT_TYPE, target: str, message: str, admin_id: int) -> None:
+    """
+    Отправляет рассылку пользователям или администраторам и сохраняет её в базе данных.
+
+    Args:
+        context: Контекст Telegram-бота.
+        target: Тип рассылки ('users' или 'admins').
+        message: Текст сообщения.
+        admin_id: ID администратора, отправившего рассылку.
+    """
+    try:
+        targets = ALLOWED_USERS if target == "users" else ALLOWED_ADMINS
+        for user_id in targets:
+            if user_id != admin_id:  # Не отправлять самому себе
+                try:
+                    await context.bot.send_message(chat_id=user_id, text=message)
+                    logger.info(f"Сообщение отправлено {user_id} в рассылке {target}")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке сообщения {user_id}: {str(e)}")
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO broadcasts (admin_id, broadcast_type, message_text) VALUES (%s, %s, %s)",
+                (admin_id, target, message)
+            )
+            conn.commit()
+        logger.info(f"Рассылка {target} сохранена в базе данных")
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении рассылки {target}: {str(e)}")
+
+async def show_user_management_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает подменю управления пользователями и администраторами.
+    """
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
     keyboard = [
-        ['Рассылка пользователям', 'Рассылка админам', 'Отчеты'],
+        ['Добавить пользователя', 'Список пользователей'],
+        ['Удалить пользователя', 'Выгрузить пользователей в Excel'],
+        ['Добавить администратора', 'Список администраторов'],
+        ['Удалить администратора', 'Выгрузить администраторов в Excel'],
         ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(f"{user_name}, выберите тип рассылки:", reply_markup=reply_markup)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
+async def show_facts_management_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает подменю управления фактами.
+    """
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Добавить факт', 'Все факты'],
+        ['Удалить факт'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
+async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает подменю отчетов.
+    """
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Создать отчет', 'Просмотреть отчеты'],
+        ['Выгрузить отчеты в Excel'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
+async def show_broadcasts_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает подменю рассылок.
+    """
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Рассылка пользователям', 'Рассылка администраторам'],
+        ['Выгрузка рассылок в Excel'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
+async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Отображает подменю файлов.
+    """
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    keyboard = [
+        ['Документы для РО', 'Архив документов РО'],
+        ['Загрузить файл'],
+        ['Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение содержимого папки в /documents/
 async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
@@ -1414,375 +1548,333 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_file_list(update, context)
         return
 
-    elif user_input == "Управление пользователями":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут управлять пользователями.",
-                                            reply_markup=default_reply_markup)
+        # Обработка главного меню администратора
+    if user_id in ALLOWED_ADMINS:
+        if user_input == "Управление пользователями":
+            context.user_data.pop('awaiting_upload', None)
+            await show_user_management_menu(update, context)
             return
-        context.user_data.pop('awaiting_upload', None)
-        await show_admin_menu(update, context)
-        return
-
-    elif user_input == "Рассылка":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
-                                            reply_markup=default_reply_markup)
+        elif user_input == "Управление фактами":
+            context.user_data.pop('awaiting_upload', None)
+            await show_facts_management_menu(update, context)
             return
-        context.user_data.pop('awaiting_upload', None)
-        await show_broadcast_menu(update, context)
-        return
-
-    elif user_input == "Рассылка пользователям":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
-                                            reply_markup=default_reply_markup)
+        elif user_input == "Отчеты":
+            context.user_data.pop('awaiting_upload', None)
+            await show_reports_menu(update, context)
             return
-        context.user_data['broadcast_type'] = 'users'
-        context.user_data['awaiting_broadcast'] = True
-        await update.message.reply_text(
-            f"{user_name}, введите текст сообщения для рассылки пользователям. Если это отчет, перечислите вопросы (каждый с новой строки):",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Рассылка админам":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
-                                            reply_markup=default_reply_markup)
+        elif user_input == "Рассылки":
+            context.user_data.pop('awaiting_upload', None)
+            await show_broadcasts_menu(update, context)
             return
-        context.user_data['broadcast_type'] = 'admins'
-        context.user_data['awaiting_broadcast'] = True
-        await update.message.reply_text(
-            f"{user_name}, введите текст сообщения для рассылки администраторам. Если это отчет, перечислите вопросы (каждый с новой строки):",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Отчеты":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут создавать отчеты.",
-                                            reply_markup=default_reply_markup)
+        elif user_input == "Файлы из папок":
+            context.user_data.pop('awaiting_upload', None)
+            await show_files_menu(update, context)
+            return
+        elif user_input == "Назад":
+            context.user_data.pop('awaiting_upload', None)
+            context.user_data.pop('awaiting_fact_id', None)
+            context.user_data.pop('awaiting_delete_user_id', None)
+            context.user_data.pop('awaiting_new_fact', None)
+            context.user_data.pop('awaiting_broadcast_users', None)
+            context.user_data.pop('awaiting_broadcast_admins', None)
+            context.user_data.pop('awaiting_report_week', None)
+            context.user_data.pop('awaiting_export_week', None)
+            await show_main_menu(update, context)
             return
 
-        context.user_data['awaiting_report_title'] = True
-        context.user_data['current_questions'] = []  # Список для вопросов
-        await update.message.reply_text(
-            f"{user_name}, введите название отчета (это будет заголовок, например, 'Прогнозная информация по мероприятиям на этой неделе'):",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Добавить пользователя":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_user_id"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(f"{user_name}, введите user_id нового пользователя (число):",
-                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Добавить администратора":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять администраторов.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_admin_id"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(f"{user_name}, введите user_id нового администратора (число):",
-                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Список пользователей":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(
-                f"{user_name}, только администраторы могут просматривать список пользователей.",
-                reply_markup=default_reply_markup)
-            return
-        context.user_data.pop('awaiting_upload', None)
-        users_list = "\n".join([f"ID: {uid}" for uid in ALLOWED_USERS]) or "Список пользователей пуст."
-        await update.message.reply_text(f"{user_name}, список пользователей:\n{users_list}",
-                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Список администраторов":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(
-                f"{user_name}, только администраторы могут просматривать список администраторов.",
-                reply_markup=default_reply_markup)
-            return
-        context.user_data.pop('awaiting_upload', None)
-        admins_list = "\n".join([f"ID: {aid}" for aid in ALLOWED_ADMINS]) or "Список администраторов пуст."
-        await update.message.reply_text(f"{user_name}, список администраторов:\n{admins_list}",
-                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Удалить пользователя":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут удалять пользователей.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_delete_user_id"] = True
-        context.user_data.pop('awaiting_upload', None)
-        users_list = "\n".join([f"ID: {uid}" for uid in ALLOWED_USERS]) or "Список пользователей пуст."
-        await update.message.reply_text(
-            f"{user_name}, выберите ID пользователя для удаления:\n{users_list}\n\nВведите ID:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Все факты (с ID)":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать факты.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data.pop('awaiting_upload', None)
-        if not KNOWLEDGE_BASE:
-            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
-        facts_list = f"{user_name}, все факты:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
-        await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты.")
-        return
-
-    elif user_input == "Добавить факт":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_new_fact"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(f"{user_name}, введите текст нового факта:", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif user_input == "Удалить факт":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data.pop('awaiting_upload', None)
-        if not KNOWLEDGE_BASE:
-            await update.message.reply_text(f"{user_name}, база знаний пуста.", reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
-        facts_list = f"{user_name}, выберите ID факта для удаления:\n" + "\n".join([f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE]) + "\n\nВведите ID:"
-        await send_long_text(update, facts_list, reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        context.user_data["awaiting_fact_id"] = True
-        logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
-        return
-
-    elif user_input == "Просмотреть отчеты":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать отчеты.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_report_week"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(
-            f"{user_name}, введите номер недели и год (например, '42 2025') для просмотра отчетов:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
-    elif context.user_data.get("awaiting_report_week", False):
-        if user_input == "Назад":
-            context.user_data.pop("awaiting_report_week", None)
-            await show_admin_menu(update, context)
-            return
-        try:
-            week_number, year = map(int, user_input.split())
-            reports = get_reports_by_week(week_number, year)
-            if not reports:
-                await update.message.reply_text(
-                    f"{user_name}, отчеты за неделю {week_number} {year} не найдены.",
-                    reply_markup=default_reply_markup
-                )
-            else:
-                report_text = f"{user_name}, отчеты за неделю {week_number} {year}:\n\n"
-                for report in reports:
-                    user_profile = USER_PROFILES.get(report['user_id'], {})
-                    user_name_report = user_profile.get('name', f"ID {report['user_id']}")
-                    region = user_profile.get('region', 'Не указан')
-                    report_text += f"Пользователь: {user_name_report} (Регион: {region}, Статус: {report['status']})\n"
-                    for idx, (question, answer) in enumerate(zip(report['questions'], report['answers'] or []), 1):
-                        report_text += f"{idx}. {question}\nОтвет: {answer or 'Не заполнено'}\n"
-                    report_text += "\n"
-                await send_long_text(update, report_text, reply_markup=default_reply_markup)
-            context.user_data.pop("awaiting_report_week", None)
-        except ValueError:
-            await update.message.reply_text(
-                f"{user_name}, введите корректный номер недели и год (например, '42 2025').",
-                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-    elif user_input == "Выгрузить отчеты в Excel":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
-                                            reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_export_week"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(
-            f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-    elif user_input == "Выгрузить пользователей в Excel":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные пользователей.",
-                                            reply_markup=default_reply_markup)
-            return
-        try:
-            output = export_users_to_excel()
-            file_name = f"users_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            await update.message.reply_document(
-                document=InputFile(output, filename=file_name),
-                caption=f"{user_name}, данные пользователей выгружены в Excel."
-            )
-            logger.info(f"Данные пользователей выгружены в Excel для админа {user_id}")
-            await show_admin_menu(update, context)
-        except Exception as e:
-            logger.error(f"Ошибка при выгрузке пользователей для админа {user_id}: {str(e)}")
-            await update.message.reply_text(
-                f"{user_name}, ошибка при выгрузке данных пользователей: {str(e)}.",
-                reply_markup=default_reply_markup
-            )
-        return
-
-    elif user_input == "Выгрузить администраторов в Excel":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(
-                f"{user_name}, только администраторы могут выгружать данные администраторов.",
-                reply_markup=default_reply_markup)
-            return
-        try:
-            output = export_admins_to_excel()
-            file_name = f"admins_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            await update.message.reply_document(
-                document=InputFile(output, filename=file_name),
-                caption=f"{user_name}, данные администраторов выгружены в Excel."
-            )
-            logger.info(f"Данные администраторов выгружены в Excel для админа {user_id}")
-            await show_admin_menu(update, context)
-        except Exception as e:
-            logger.error(f"Ошибка при выгрузке администраторов для админа {user_id}: {str(e)}")
-            await update.message.reply_text(
-                f"{user_name}, ошибка при выгрузке данных администраторов: {str(e)}.",
-                reply_markup=default_reply_markup
-            )
-        return
-
-    elif context.user_data.get("awaiting_export_week", False):
-        if user_input == "Назад":
-            context.user_data.pop("awaiting_export_week", None)
-            await show_admin_menu(update, context)
-            return
-        try:
-            week_number, year = map(int, user_input.split())
-            reports = get_reports_by_week(week_number, year)
-            if not reports:
-                await update.message.reply_text(
-                    f"{user_name}, отчеты за неделю {week_number} {year} не найдены.",
-                    reply_markup=default_reply_markup
-                )
-                context.user_data.pop("awaiting_export_week", None)
+        # Обработка подменю "Управление пользователями"
+        elif user_input == "Добавить пользователя":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
+                                                reply_markup=default_reply_markup)
                 return
-            # Подготовка данных для Excel
-            data = []
-            for report in reports:
-                user_profile = USER_PROFILES.get(report['user_id'], {})
-                user_name_report = user_profile.get('name', f"ID {report['user_id']}")
-                region = user_profile.get('region', 'Не указан')
-                row = {
-                    'User ID': report['user_id'],
-                    'Имя': user_name_report,
-                    'Регион': region,
-                    'Статус': report['status'],
-                    'Создано': report['created_at'].strftime('%Y-%m-%d %H:%M:%S') if report['created_at'] else '',
-                }
-                for idx, (question, answer) in enumerate(zip(report['questions'], report['answers'] or []), 1):
-                    row[f'Вопрос {idx}'] = question
-                    row[f'Ответ {idx}'] = answer or 'Не заполнено'
-                data.append(row)
-            # Создание DataFrame и Excel
-            df = pd.DataFrame(data)
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name=f'Отчеты_неделя_{week_number}_{year}')
-            output.seek(0)
-            # Отправка файла
-            file_name = f'reports_week_{week_number}_{year}.xlsx'
-            await update.message.reply_document(
-                document=InputFile(output, filename=file_name),
-                caption=f"{user_name}, отчеты за неделю {week_number} {year} выгружены в Excel."
-            )
-            logger.info(f"Отчеты за неделю {week_number} {year} выгружены в Excel для админа {user_id}")
-            context.user_data.pop("awaiting_export_week", None)
-            await show_admin_menu(update, context)
-        except ValueError:
+            context.user_data["awaiting_user_id"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(f"{user_name}, введите user_id нового пользователя (число):",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Список пользователей":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(
+                    f"{user_name}, только администраторы могут просматривать список пользователей.",
+                    reply_markup=default_reply_markup)
+                return
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM allowed_users")
+                    users = [str(row[0]) for row in cur.fetchall()]
+                await send_long_text(update,
+                                     f"{user_name}, список пользователей:\n{', '.join(users) if users else 'Нет пользователей.'}",
+                                     reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+                await show_user_management_menu(update, context)
+            except Exception as e:
+                logger.error(f"Ошибка при получении списка пользователей: {str(e)}")
+                await update.message.reply_text(f"{user_name}, ошибка: {str(e)}",
+                                                reply_markup=default_reply_markup)
+            return
+        elif user_input == "Удалить пользователя":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут удалять пользователей.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_delete_user_id"] = True
+            context.user_data.pop('awaiting_upload', None)
+            users_list = "\n".join([f"ID: {uid}" for uid in ALLOWED_USERS]) or "Список пользователей пуст."
             await update.message.reply_text(
-                f"{user_name}, введите корректный номер недели и год (например, '42 2025').",
+                f"{user_name}, выберите ID пользователя для удаления:\n{users_list}\n\nВведите ID:",
                 reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
+            return
+        elif user_input == "Выгрузить пользователей в Excel":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(
+                    f"{user_name}, только администраторы могут выгружать данные пользователей.",
+                    reply_markup=default_reply_markup)
+                return
+            try:
+                output = export_users_to_excel()
+                file_name = f"users_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                await update.message.reply_document(
+                    document=InputFile(output, filename=file_name),
+                    caption=f"{user_name}, данные пользователей выгружены в Excel."
+                )
+                logger.info(f"Данные пользователей выгружены в Excel для админа {user_id}")
+                await show_user_management_menu(update, context)
+            except Exception as e:
+                logger.error(f"Ошибка при выгрузке пользователей для админа {user_id}: {str(e)}")
+                await update.message.reply_text(
+                    f"{user_name}, ошибка при выгрузке данных пользователей: {str(e)}.",
+                    reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Добавить администратора":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут добавлять администраторов.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_admin_id"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(f"{user_name}, введите user_id нового администратора (число):",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Список администраторов":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(
+                    f"{user_name}, только администраторы могут просматривать список администраторов.",
+                    reply_markup=default_reply_markup)
+                return
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM allowed_admins")
+                    admins = [str(row[0]) for row in cur.fetchall()]
+                await send_long_text(update,
+                                     f"{user_name}, список администраторов:\n{', '.join(admins) if admins else 'Нет администраторов.'}",
+                                     reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+                await show_user_management_menu(update, context)
+            except Exception as e:
+                logger.error(f"Ошибка при получении списка администраторов: {str(e)}")
+                await update.message.reply_text(f"{user_name}, ошибка: {str(e)}",
+                                                reply_markup=default_reply_markup)
+            return
+        elif user_input == "Удалить администратора":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут удалять администраторов.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_delete_admin_id"] = True
+            context.user_data.pop('awaiting_upload', None)
+            admins_list = "\n".join([f"ID: {aid}" for aid in ALLOWED_ADMINS]) or "Список администраторов пуст."
+            await update.message.reply_text(
+                f"{user_name}, выберите ID администратора для удаления:\n{admins_list}\n\nВведите ID:",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Выгрузить администраторов в Excel":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(
+                    f"{user_name}, только администраторы могут выгружать данные администраторов.",
+                    reply_markup=default_reply_markup)
+                return
+            try:
+                output = export_admins_to_excel()
+                file_name = f"admins_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                await update.message.reply_document(
+                    document=InputFile(output, filename=file_name),
+                    caption=f"{user_name}, данные администраторов выгружены в Excel."
+                )
+                logger.info(f"Данные администраторов выгружены в Excel для админа {user_id}")
+                await show_user_management_menu(update, context)
+            except Exception as e:
+                logger.error(f"Ошибка при выгрузке администраторов для админа {user_id}: {str(e)}")
+                await update.message.reply_text(
+                    f"{user_name}, ошибка при выгрузке данных администраторов: {str(e)}.",
+                    reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
 
-    elif user_input == "Назад":
-        context.user_data.pop('awaiting_upload', None)
-        context.user_data.pop('awaiting_fact_id', None)
-        context.user_data.pop('awaiting_delete_user_id', None)
-        context.user_data.pop('awaiting_new_fact', None)
-        context.user_data.pop('awaiting_broadcast', None)
-        context.user_data.pop('broadcast_type', None)
-        if context.user_data.get('current_mode') == 'documents_nav':
-            current_path = context.user_data.get('current_path', '/documents/')
-            if current_path == '/documents/':
-                context.user_data.pop('current_mode', None)
-                context.user_data.pop('current_path', None)
-                context.user_data.pop('file_list', None)
-                await show_main_menu(update, context)
-            else:
-                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
-                context.user_data['current_path'] = parent_path
-                await show_current_docs(update, context, is_return=True)
-        else:
-            await show_admin_menu(update, context) if 'broadcast_type' in context.user_data else await show_main_menu(update, context)
-        return
+        # Обработка подменю "Управление фактами"
+        elif user_input == "Добавить факт":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_new_fact"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(f"{user_name}, введите текст нового факта:",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Все факты":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут просматривать факты.",
+                                                reply_markup=default_reply_markup)
+                return
+            if not KNOWLEDGE_BASE:
+                await update.message.reply_text(f"{user_name}, база знаний пуста.",
+                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+                return
+            facts_list = f"{user_name}, все факты:\n" + "\n".join(
+                [f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE])
+            await send_long_text(update, facts_list,
+                                 reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            await show_facts_management_menu(update, context)
+            logger.info(f"Администратор {user_id} запросил список фактов. Показаны факты.")
+            return
+        elif user_input == "Удалить факт":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_fact_id"] = True
+            context.user_data.pop('awaiting_upload', None)
+            if not KNOWLEDGE_BASE:
+                await update.message.reply_text(f"{user_name}, база знаний пуста.",
+                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+                return
+            facts_list = f"{user_name}, выберите ID факта для удаления:\n" + "\n".join(
+                [f"ID: {fact['id']} — {fact['text']}" for fact in KNOWLEDGE_BASE]) + "\n\nВведите ID:"
+            await send_long_text(update, facts_list,
+                                 reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
+            return
 
-    elif user_input == "Отмена":
-        context.user_data.pop('awaiting_upload', None)
-        context.user_data.pop('current_report_id', None)
-        context.user_data.pop('current_question_index', None)
-        context.user_data.pop('current_answers', None)
-        await show_main_menu(update, context)
-        return
+        # Обработка подменю "Отчеты"
+        elif user_input == "Создать отчет":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут создавать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data['awaiting_report_questions'] = True
+            context.user_data['current_questions'] = []
+            await update.message.reply_text(
+                f"{user_name}, введите вопросы для отчета (один или несколько, разделённые запятыми):",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Просмотреть отчеты":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут просматривать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_report_week"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(
+                f"{user_name}, введите номер недели и год (например, '42 2025') для просмотра отчетов:",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Выгрузить отчеты в Excel":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_export_week"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(
+                f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
 
-    elif context.user_data.get('current_mode') == 'documents_nav':
-        current_path = context.user_data.get('current_path', '/documents/')
-        if user_input == "В главное меню":
+        # Обработка подменю "Рассылки"
+        elif user_input == "Рассылка пользователям":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_broadcast_users"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(f"{user_name}, введите текст для рассылки пользователям:",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Рассылка администраторам":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_broadcast_admins"] = True
+            context.user_data.pop('awaiting_upload', None)
+            await update.message.reply_text(f"{user_name}, введите текст для рассылки администраторам:",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+        elif user_input == "Выгрузка рассылок в Excel":
+            if user_id not in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные рассылок.",
+                                                reply_markup=default_reply_markup)
+                return
+            try:
+                output = export_broadcasts_to_excel()
+                file_name = f"broadcasts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                await update.message.reply_document(
+                    document=InputFile(output, filename=file_name),
+                    caption=f"{user_name}, данные рассылок выгружены в Excel."
+                )
+                logger.info(f"Данные рассылок выгружены в Excel для админа {user_id}")
+                await show_broadcasts_menu(update, context)
+            except Exception as e:
+                logger.error(f"Ошибка при выгрузке рассылок для админа {user_id}: {str(e)}")
+                await update.message.reply_text(
+                    f"{user_name}, ошибка при выгрузке данных рассылок: {str(e)}.",
+                    reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+
+        # Обработка подменю "Файлы из папок"
+        elif user_input == "Документы для РО":
+            context.user_data['current_mode'] = 'documents_nav'
+            context.user_data['current_path'] = '/documents/'
+            context.user_data.pop('file_list', None)
+            context.user_data.pop('awaiting_upload', None)
+            await show_current_docs(update, context)
+            return
+        elif user_input == "Архив документов РО":
             context.user_data.pop('current_mode', None)
             context.user_data.pop('current_path', None)
             context.user_data.pop('file_list', None)
-            await show_main_menu(update, context)
+            context.user_data.pop('awaiting_upload', None)
+            await show_file_list(update, context)
             return
-        elif user_input == "Назад":
-            if current_path == '/documents/':
-                context.user_data.pop('current_mode', None)
-                context.user_data.pop('current_path', None)
-                context.user_data.pop('file_list', None)
-                await show_main_menu(update, context)
-            else:
-                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
-                context.user_data['current_path'] = parent_path
-                await show_current_docs(update, context, is_return=True)
-            return
-        else:
-            new_path = f"{current_path.rstrip('/')}/{user_input}/"
-            if create_yandex_folder(new_path):
-                context.user_data['current_path'] = new_path
-                await show_current_docs(update, context)
-            else:
-                await update.message.reply_text(
-                    f"{user_name}, ошибка при переходе в папку {user_input}.",
-                    reply_markup=default_reply_markup
-                )
+        elif user_input == "Загрузить файл":
+            context.user_data["awaiting_upload"] = True
+            await update.message.reply_text(
+                f"{user_name}, отправьте файл (поддерживаются .pdf, .doc, .docx, .xls, .xlsx, .cdr, .eps, .png, .jpg, .jpeg).",
+                reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True))
             return
 
-    else:
-        response = await generate_ai_response(user_id, user_input, user_name, chat_id)
-        log_request(user_id, user_input, response)
-        await send_long_text(update, response, reply_markup=default_reply_markup)
+        # Обработка состояний рассылок
+    elif context.user_data.get("awaiting_broadcast_users", False):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_broadcast_users", None)
+            await show_broadcasts_menu(update, context)
+            return
+        await send_broadcast(context, "users", user_input, user_id)
+        await update.message.reply_text(f"{user_name}, рассылка пользователям отправлена.",
+                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        await show_broadcasts_menu(update, context)
+        context.user_data.pop("awaiting_broadcast_users", None)
+        return
+    elif context.user_data.get("awaiting_broadcast_admins", False):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_broadcast_admins", None)
+            await show_broadcasts_menu(update, context)
+            return
+        await send_broadcast(context, "admins", user_input, user_id)
+        await update.message.reply_text(f"{user_name}, рассылка администраторам отправлена.",
+                                        reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        await show_broadcasts_menu(update, context)
+        context.user_data.pop("awaiting_broadcast_admins", None)
+        return
 
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
