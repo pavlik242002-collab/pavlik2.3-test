@@ -870,14 +870,25 @@ async def send_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         await show_main_menu(update, context)
 
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    keyboard = [
-        ['Управление пользователями', 'Управление фактами'],
-        ['Отчеты', 'Рассылки'],
-        ['Файлы из папок']
-    ]
+
+    if user_id in ALLOWED_ADMINS:
+        # Меню для администраторов
+        keyboard = [
+            ['Управление пользователями', 'Управление фактами'],
+            ['Отчеты', 'Рассылки'],
+            ['Файлы из папок']
+        ]
+    else:
+        # Меню для обычных пользователей
+        keyboard = [
+            ['Документы для РО', 'Архив документов РО'],
+            ['Загрузить файл']
+        ]
+
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = reply_markup
     context.user_data.pop('current_mode', None)
@@ -900,6 +911,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data.pop('current_questions', None)
     context.user_data.pop('question_index', None)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+
 
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
@@ -1139,6 +1151,7 @@ async def send_long_text(update: Update, text: str, reply_markup=None, max_lengt
         await update.message.reply_text(part, reply_markup=reply_markup if i + max_length >= len(text) else None)
 
 
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global KNOWLEDGE_BASE, ALLOWED_USERS, ALLOWED_ADMINS
     user_id: int = update.effective_user.id
@@ -1169,12 +1182,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Сначала пройдите регистрацию с /start.")
         return
 
-    admin_keyboard = [
-        ['Управление пользователями', 'Управление фактами'],
-        ['Отчеты', 'Рассылки'],
-        ['Файлы из папок']
-    ]
-    default_reply_markup = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
+    # Устанавливаем клавиатуру по умолчанию в зависимости от роли пользователя
+    if user_id in ALLOWED_ADMINS:
+        keyboard = [
+            ['Управление пользователями', 'Управление фактами'],
+            ['Отчеты', 'Рассылки'],
+            ['Файлы из папок']
+        ]
+    else:
+        keyboard = [
+            ['Документы для РО', 'Архив документов РО'],
+            ['Загрузить файл']
+        ]
+    default_reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = default_reply_markup
 
     if context.user_data.get('awaiting_report_title', False):
@@ -1271,28 +1291,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('awaiting_broadcast', None)
             context.user_data.pop('broadcast_type', None)
             return
-        questions = [q.strip() for q in broadcast_message.split('\n') if q.strip()]
-        is_report = len(questions) > 1 or any(q.startswith(('1.', '2.', '3.', '4.', '5.', '6.')) for q in questions)
-        report_id = str(uuid.uuid4()) if is_report else None
-        week_number = datetime.now().isocalendar().week
-        year = datetime.now().year
         sent_count = 0
         for recipient_id in recipients:
             if recipient_id == user_id:
                 continue
             try:
-                if is_report:
-                    create_report(report_id, recipient_id, questions, week_number, year)
-                    reply_markup = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")]
-                    ])
-                    await context.bot.send_message(
-                        chat_id=recipient_id,
-                        text=f"{get_user_name(recipient_id)}, заполните отчет за неделю {week_number} {year}:\n\n{broadcast_message}",
-                        reply_markup=reply_markup
-                    )
-                else:
-                    await context.bot.send_message(chat_id=recipient_id, text=broadcast_message)
+                await context.bot.send_message(chat_id=recipient_id, text=broadcast_message)
                 sent_count += 1
             except Exception as e:
                 logger.error(f"Ошибка отправки сообщения пользователю {recipient_id}: {str(e)}")
@@ -1351,6 +1355,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_user_id", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_user_id", None)
+            return
         try:
             new_user_id = int(user_input)
             if new_user_id in ALLOWED_USERS:
@@ -1363,13 +1372,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
                 logger.info(f"Пользователь {new_user_id} добавлен администратором {user_id}")
             context.user_data.pop("awaiting_user_id", None)
-            return
         except ValueError:
             await update.message.reply_text(f"{user_name}, пожалуйста, введите корректный user_id (число).",
                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
+        return
 
     if context.user_data.get("awaiting_admin_id", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять администраторов.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_admin_id", None)
+            return
         try:
             new_admin_id = int(user_input)
             if new_admin_id in ALLOWED_ADMINS:
@@ -1382,13 +1395,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
                 logger.info(f"Администратор {new_admin_id} добавлен администратором {user_id}")
             context.user_data.pop("awaiting_admin_id", None)
-            return
         except ValueError:
             await update.message.reply_text(f"{user_name}, пожалуйста, введите корректный admin_id (число).",
                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
+        return
 
     if context.user_data.get("awaiting_delete_user_id", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут удалять пользователей.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_delete_user_id", None)
+            return
         try:
             user_id_to_delete = int(user_input)
             if user_id_to_delete == user_id:
@@ -1409,13 +1426,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text(f"{user_name}, пользователь с ID {user_id_to_delete} не найден.",
                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             context.user_data.pop("awaiting_delete_user_id", None)
-            return
         except ValueError:
             await update.message.reply_text(f"{user_name}, пожалуйста, введите корректный user_id (число).",
                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
+        return
 
     if context.user_data.get("awaiting_delete_admin_id", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут удалять администраторов.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_delete_admin_id", None)
+            return
         try:
             admin_id_to_delete = int(user_input)
             if admin_id_to_delete == user_id:
@@ -1431,11 +1452,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text(f"{user_name}, администратор с ID {admin_id_to_delete} не найден.",
                                                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
             context.user_data.pop("awaiting_delete_admin_id", None)
-            return
         except ValueError:
             await update.message.reply_text(f"{user_name}, пожалуйста, введите корректный admin_id (число).",
                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-            return
+        return
 
     if context.user_data.get("awaiting_federal_district", False):
         if user_input in FEDERAL_DISTRICTS:
@@ -1526,23 +1546,73 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if user_input == "Управление пользователями":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут управлять пользователями.",
+                                           reply_markup=default_reply_markup)
+            return
         await show_admin_menu(update, context)
         return
 
     elif user_input == "Управление фактами":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут управлять фактами.",
+                                           reply_markup=default_reply_markup)
+            return
         await show_facts_menu(update, context)
         return
 
     elif user_input == "Отчеты":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут управлять отчетами.",
+                                           reply_markup=default_reply_markup)
+            return
         await show_reports_menu(update, context)
         return
 
     elif user_input == "Рассылки":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                           reply_markup=default_reply_markup)
+            return
         await show_broadcast_menu(update, context)
         return
 
-    elif user_input == "Файлы из папок":
-        await show_files_menu(update, context)
+    elif user_input == "Рассылка пользователям":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                           reply_markup=default_reply_markup)
+            return
+        context.user_data['awaiting_broadcast'] = True
+        context.user_data['broadcast_type'] = 'users'
+        context.user_data.pop('awaiting_upload', None)
+        await update.message.reply_text(
+            f"{user_name}, введите текст сообщения для рассылки пользователям:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif user_input == "Рассылка администраторам":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
+                                           reply_markup=default_reply_markup)
+            return
+        context.user_data['awaiting_broadcast'] = True
+        context.user_data['broadcast_type'] = 'admins'
+        context.user_data.pop('awaiting_upload', None)
+        await update.message.reply_text(
+            f"{user_name}, введите текст сообщения для рассылки администраторам:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif user_input == "Выгрузка рассылок в Excel":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные рассылок.",
+                                           reply_markup=default_reply_markup)
+            return
+        context.user_data["awaiting_broadcast_export_week"] = True
+        context.user_data.pop('awaiting_upload', None)
+        await update.message.reply_text(
+            f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки рассылок в Excel:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
     elif user_input == "Загрузить файл":
@@ -1766,19 +1836,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
-    elif user_input == "Выгрузка рассылок в Excel":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные рассылок.",
-                                           reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_broadcast_export_week"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(
-            f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки рассылок в Excel:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
-        return
-
     elif context.user_data.get("awaiting_report_week", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать отчеты.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_report_week", None)
+            return
         if user_input == "Назад":
             context.user_data.pop("awaiting_report_week", None)
             await show_reports_menu(update, context)
@@ -1810,6 +1873,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif context.user_data.get("awaiting_export_week", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_export_week", None)
+            return
         if user_input == "Назад":
             context.user_data.pop("awaiting_export_week", None)
             await show_reports_menu(update, context)
@@ -1840,6 +1908,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif context.user_data.get("awaiting_broadcast_export_week", False):
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные рассылок.",
+                                           reply_markup=default_reply_markup)
+            context.user_data.pop("awaiting_broadcast_export_week", None)
+            return
         if user_input == "Назад":
             context.user_data.pop("awaiting_broadcast_export_week", None)
             await show_broadcast_menu(update, context)
