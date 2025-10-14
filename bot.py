@@ -2001,7 +2001,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         log_request(user_id, user_input, response)
         await send_long_text(update, response, reply_markup=default_reply_markup)
 
-# Обработка загруженных документов
+# Обработка загруженных документов123123
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
