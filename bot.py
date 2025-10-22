@@ -2001,7 +2001,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         log_request(user_id, user_input, response)
         await send_long_text(update, response, reply_markup=default_reply_markup)
 
-# Обработка загруженных документовттт
+# Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
@@ -2096,17 +2096,45 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
 # Основная функция запуска бота
 def main() -> None:
     try:
+        # Создаём приложение как раньше
         application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+        # Добавляем обработчики (как в твоём коде)
         application.add_handler(CommandHandler("start", send_welcome))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
+
+        # Добавляем job для напоминаний (как раньше)
         application.job_queue.run_repeating(check_reminders, interval=21600, first=60)  # Каждые 6 часов
-        logger.info("Бот запущен, начинаю polling...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+        # Настройка webhook
+        port = int(os.getenv('PORT', 8443))  # Порт из Railway
+
+        # Замени на реальный URL
+        webhook_url = 'https://your-bot-app.railway.app/' + TELEGRAM_TOKEN
+
+        # Устанавливаем webhook
+        async def set_webhook():
+            await application.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook установлен на {webhook_url}")
+
+        # Запускаем приложение с webhook
+        application.run_webhook(
+            listen='0.0.0.0',
+            port=port,
+            url_path=TELEGRAM_TOKEN,
+            webhook_url=webhook_url
+        )
+
+        # Устанавливаем webhook
+        asyncio.run(set_webhook())
+
+        logger.info(f"Бот запущен на webhook, слушает на порту {port}")
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
+
 
 if __name__ == '__main__':
     main()
