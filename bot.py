@@ -13,7 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram import InputFile
 from urllib.parse import quote
 from openai import OpenAI
-import psycopg2
+import psycopg
 from duckduckgo_search import DDGS
 import pandas as pd
 from io import BytesIO
@@ -46,7 +46,7 @@ if not all([TELEGRAM_TOKEN, YANDEX_TOKEN, XAI_TOKEN, DATABASE_URL]):
 
 # Подключение к Postgres
 try:
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL)
     logger.info("Подключение к Postgres успешно.")
 except Exception as e:
     logger.error(f"Ошибка подключения к Postgres: {str(e)}")
