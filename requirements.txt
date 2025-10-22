@@ -1,6 +1,6 @@
 python-telegram-bot[webhooks,job-queue]
 requests
-psycopg2-binary
+psycopg
 openai
 pandas
 duckduckgo_search
