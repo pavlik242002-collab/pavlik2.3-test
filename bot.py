@@ -17,6 +17,8 @@ import psycopg2
 from duckduckgo_search import DDGS
 import pandas as pd
 from io import BytesIO
+import asyncio  # Новый импорт
+from telegram.ext import ApplicationBuilder  # Новый импорт
 
 # Настройка логирования
 logging.basicConfig(
