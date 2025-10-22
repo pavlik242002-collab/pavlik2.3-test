@@ -13,12 +13,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram import InputFile
 from urllib.parse import quote
 from openai import OpenAI
-import psycopg
+import psycopg2
 from duckduckgo_search import DDGS
 import pandas as pd
 from io import BytesIO
-import asyncio  # Новый импорт
-from telegram.ext import ApplicationBuilder  # Новый импорт
 
 # Настройка логирования
 logging.basicConfig(
@@ -46,7 +44,7 @@ if not all([TELEGRAM_TOKEN, YANDEX_TOKEN, XAI_TOKEN, DATABASE_URL]):
 
 # Подключение к Postgres
 try:
-    conn = psycopg.connect(DATABASE_URL)
+    conn = psycopg2.connect(DATABASE_URL)
     logger.info("Подключение к Postgres успешно.")
 except Exception as e:
     logger.error(f"Ошибка подключения к Postgres: {str(e)}")
@@ -2099,39 +2097,16 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     try:
         application = Application.builder().token(TELEGRAM_TOKEN).build()
-
         application.add_handler(CommandHandler("start", send_welcome))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
-
         application.job_queue.run_repeating(check_reminders, interval=21600, first=60)  # Каждые 6 часов
-
-        port = int(os.getenv('PORT', 8443))
-        webhook_url = 'https://your-bot-app.railway.app/' + TELEGRAM_TOKEN  # Замените на ваш URL
-
-        # Устанавливаем webhook перед запуском сервера
-        async def set_webhook():
-            await application.bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook установлен на {webhook_url}")
-
-        # Запускаем set_webhook синхронно перед run_webhook
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(set_webhook())
-
-        # Запускаем webhook-сервер
-        application.run_webhook(
-            listen='0.0.0.0',
-            port=port,
-            url_path=TELEGRAM_TOKEN,
-            webhook_url=webhook_url
-        )
-
-        logger.info(f"Бот запущен на webhook, слушает на порту {port}")
+        logger.info("Бот запущен, начинаю polling...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
-
 
 if __name__ == '__main__':
     main()
