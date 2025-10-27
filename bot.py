@@ -18,6 +18,7 @@ from duckduckgo_search import DDGS
 import pandas as pd
 from io import BytesIO
 
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
@@ -37,7 +38,7 @@ XAI_TOKEN = os.getenv("XAI_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 XAI_MODEL = os.getenv("XAI_MODEL", "grok-3")
 
-# Проверка токенов и DATABASE_URL
+# Проверка токенов и DATABASE_URL111
 if not all([TELEGRAM_TOKEN, YANDEX_TOKEN, XAI_TOKEN, DATABASE_URL]):
     logger.error("Токены или DATABASE_URL не найдены в .env файле!")
     raise ValueError("Укажите TELEGRAM_TOKEN, YANDEX_TOKEN, XAI_TOKEN, DATABASE_URL в .env")
