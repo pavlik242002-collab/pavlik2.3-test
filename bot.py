@@ -1088,9 +1088,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
                 # === ОТПРАВЛЯЕМ ФАЙЛ ===
                 await query.message.reply_document(
-                    document=InputFile(file_response.content, filename=file_name),
-                    caption=f"_{file_name}_",
-                    parse_mode='Markdown'
+                    document=InputFile(file_response.content, filename=file_name)
                 )
 
                 # === СОХРАНЯЕМ ПУТЬ И ПОКАЗЫВАЕМ ПАПКИ ===
@@ -1138,10 +1136,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
                     return
 
+                # Отправляем ТОЛЬКО файл — без подписи
                 await query.message.reply_document(
-                    document=InputFile(file_response.content, filename=file_name),
-                    caption=f"_{file_name}_",
-                    parse_mode='Markdown'
+                    document=InputFile(file_response.content, filename=file_name)
                 )
             else:
                 await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
