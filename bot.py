@@ -2394,7 +2394,7 @@ async def show_full_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup([["Назад в админку"]], resize_keyboard=True)
     )
 
-# === ОБРАБОТКА СООБЩЕНИЙ В АДМИН-ПАНЕЛИ ===
+# === ОБРАБОТКА СООБЩЕНИЙ В АДМИН-ПАНЕЛИ (ИСПРАВЛЕНО) ===
 async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_input = update.message.text.strip()
@@ -2405,7 +2405,6 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
     # === ВЫХОД И НАЗАД ===
     if user_input == "Выйти из админки":
         context.user_data.pop('in_admin_panel', None)
-        await show_admin_panel(update, context)  # Обновим панель
         await show_main_menu(update, context)
         return True
 
@@ -2422,24 +2421,32 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
         await show_full_stats(update, context)
         return True
 
-    # === ПЕРЕНАПРАВЛЕНИЕ НА СТАРЫЕ ФУНКЦИИ ===
-    mapping = {
-        "Пользователи": "Управление пользователями",
-        "Администраторы": "Управление пользователями",
-        "Отчёты": "Отчеты",
-        "Рассылки": "Рассылки",
-        "База знаний": "Управление фактами",
-        "Файлы": "Файлы из папок",
-    }
-
-    if user_input in mapping:
-        # Имитируем нажатие старой кнопки
-        update.message.text = mapping[user_input]
-        context.user_data['in_admin_panel'] = True  # Остаёмся в админке
-        await handle_message(update, context)
+    # === ПРЯМОЙ ВЫЗОВ СТАРЫХ ФУНКЦИЙ (БЕЗ ИЗМЕНЕНИЯ TEXT) ===
+    if user_input == "Пользователи":
+        await show_user_management(update, context)
         return True
 
-    # Если ничего не подошло — игнорируем
+    if user_input == "Администраторы":
+        await show_admin_management(update, context)
+        return True
+
+    if user_input == "Отчёты":
+        await show_reports_menu(update, context)
+        return True
+
+    if user_input == "Рассылки":
+        await show_broadcast_menu(update, context)
+        return True
+
+    if user_input == "База знаний":
+        await show_knowledge_management(update, context)
+        return True
+
+    if user_input == "Файлы":
+        await show_files_menu(update, context)
+        return True
+
+    # Если ничего не подошло
     return False
 
 # === ВСЁ, ЧТО ВЫШЕ — ТВОЙ СТАРЫЙ КОД + АДМИН-ПАНЕЛЬ ===
