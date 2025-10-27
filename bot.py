@@ -987,54 +987,44 @@ async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение содержимого папки в /documents/
+async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
 
-# === ВСТАВЬ ЭТУ ФУНКЦИЮ ВМЕСТО СТАРОЙ show_current_docs ===
+    context.user_data.pop('file_list', None)
+    current_path = context.user_data.get('current_path', '/documents/')
+    folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
 
-    async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
-        user_id: int = update.effective_user.id
-        user_name = get_user_name(user_id)
+    files = list_yandex_disk_files(current_path)
+    dirs = list_yandex_disk_directories(current_path)
 
-        context.user_data.pop('file_list', None)
-        current_path = context.user_data.get('current_path', '/documents/')
-        folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
+    # === Клавиатура папок ===
+    keyboard = [[dir_name] for dir_name in dirs]
+    if current_path != '/documents/':
+        keyboard.append(['Назад'])
+    keyboard.append(['В главное меню'])
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-        files = list_yandex_disk_files(current_path)
-        dirs = list_yandex_disk_directories(current_path)
-
-        # === Клавиатура папок ===
-        keyboard = [[dir_name] for dir_name in dirs]
-        if current_path != '/documents/':
-            keyboard.append(['Назад'])
-        keyboard.append(['В главное меню'])
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-        if files:
-            context.user_data['file_list'] = files
-            context.user_data['current_path'] = current_path
-            file_keyboard = [
-                [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
-                for idx, item in enumerate(files)
-            ]
-            file_reply_markup = InlineKeyboardMarkup(file_keyboard)
-            await update.message.reply_text(
-                f"*{folder_name}*:",
-                reply_markup=file_reply_markup,
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(
-                f"*{folder_name}*:",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-
+    if files:
+        context.user_data['file_list'] = files
+        context.user_data['current_path'] = current_path
+        file_keyboard = [
+            [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
+            for idx, item in enumerate(files)
+        ]
+        file_reply_markup = InlineKeyboardMarkup(file_keyboard)
+        await update.message.reply_text(
+            f"*{folder_name}*:",
+            reply_markup=file_reply_markup,
+            parse_mode='Markdown'
+        )
     else:
-        # Если папка пуста — только папки
         await update.message.reply_text(
             f"*{folder_name}*:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
+
 
 # Отображение файлов в папке региона
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
