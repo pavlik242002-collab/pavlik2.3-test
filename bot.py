@@ -1286,6 +1286,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('current_questions', None)
             await show_reports_menu(update, context)
             return
+
+        async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            user_id = update.effective_user.id
+            user_input = update.message.text.strip()
+
+            # === ПРОВЕРКА НА ПЕРЕНАПРАВЛЕНИЕ ИЗ АДМИНКИ ===
+            if context.user_data.get('admin_panel_redirect'):
+                user_input = context.user_data.pop('admin_panel_redirect')  # Берём нужный текст
+                update.message.text = user_input  # Теперь можно — мы сами создаём копию
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+
         report_title = user_input.strip()
         context.user_data['report_title'] = report_title
         context.user_data.pop('awaiting_report_title', None)
@@ -2394,7 +2405,7 @@ async def show_full_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup([["Назад в админку"]], resize_keyboard=True)
     )
 
-# === ОБРАБОТКА СООБЩЕНИЙ В АДМИН-ПАНЕЛИ (ИСПРАВЛЕНО) ===
+# === ОБРАБОТКА СООБЩЕНИЙ В АДМИН-ПАНЕЛИ (ФИНАЛЬНАЯ ВЕРСИЯ) ===
 async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_input = update.message.text.strip()
@@ -2421,32 +2432,24 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
         await show_full_stats(update, context)
         return True
 
-    # === ПРЯМОЙ ВЫЗОВ СТАРЫХ ФУНКЦИЙ (БЕЗ ИЗМЕНЕНИЯ TEXT) ===
-    if user_input == "Пользователи":
-        await show_user_management(update, context)
+    # === ПЕРЕНАПРАВЛЕНИЕ ЧЕРЕЗ ФЛАГ (БЕЗ ИЗМЕНЕНИЯ TEXT) ===
+    mapping = {
+        "Пользователи": "Управление пользователями",
+        "Администраторы": "Управление пользователями",
+        "Отчёты": "Отчеты",
+        "Рассылки": "Рассылки",
+        "База знаний": "Управление фактами",
+        "Файлы": "Файлы из папок",
+    }
+
+    if user_input in mapping:
+        # Устанавливаем флаг, что мы из админки
+        context.user_data['admin_panel_redirect'] = mapping[user_input]
+        context.user_data['in_admin_panel'] = False  # Временно выходим
+        await handle_message(update, context)
+        context.user_data['in_admin_panel'] = True  # Возвращаемся
         return True
 
-    if user_input == "Администраторы":
-        await show_admin_management(update, context)
-        return True
-
-    if user_input == "Отчёты":
-        await show_reports_menu(update, context)
-        return True
-
-    if user_input == "Рассылки":
-        await show_broadcast_menu(update, context)
-        return True
-
-    if user_input == "База знаний":
-        await show_knowledge_management(update, context)
-        return True
-
-    if user_input == "Файлы":
-        await show_files_menu(update, context)
-        return True
-
-    # Если ничего не подошло
     return False
 
 # === ВСЁ, ЧТО ВЫШЕ — ТВОЙ СТАРЫЙ КОД + АДМИН-ПАНЕЛЬ ===
