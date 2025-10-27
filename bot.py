@@ -178,6 +178,42 @@ def init_db(conn):
             else:
                 logger.info("Таблица reports уже существует.")
 
+            # === БЕЗОПАСНОЕ ОБНОВЛЕНИЕ ТАБЛИЦЫ reports ===
+            try:
+                with conn.cursor() as cur:
+                    # Добавляем report_title
+                    cur.execute("""
+                        ALTER TABLE reports 
+                        ADD COLUMN IF NOT EXISTS report_title TEXT;
+                    """)
+
+                    # Добавляем reminder_interval_minutes
+                    cur.execute("""
+                        ALTER TABLE reports 
+                        ADD COLUMN IF NOT EXISTS reminder_interval_minutes INTEGER DEFAULT 60;
+                    """)
+
+                    # Добавляем is_reminder_active
+                    cur.execute("""
+                        ALTER TABLE reports 
+                        ADD COLUMN IF NOT EXISTS is_reminder_active BOOLEAN DEFAULT TRUE;
+                    """)
+
+                    # Для старых отчетов — заполняем title (если пусто)
+                    cur.execute("""
+                        UPDATE reports 
+                        SET report_title = 'Отчет за неделю ' || week_number || ' ' || year
+                        WHERE report_title IS NULL;
+                    """)
+
+                conn.commit()
+                logger.info(
+                    "Таблица reports обновлена: добавлены report_title, reminder_interval_minutes, is_reminder_active")
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении reports: {str(e)}")
+                conn.rollback()
+
+
             conn.commit()
             logger.info("Все таблицы проверены и созданы при необходимости.")
     except Exception as e:
@@ -232,6 +268,134 @@ FEDERAL_DISTRICTS = {
         "Сахалинская область", "Еврейская автономная область", "Чукотский автономный округ"
     ]
 }
+
+
+# === Часовые пояса регионов ===
+import pytz
+from datetime import time
+
+REGION_TIMEZONES = {
+    # Дальний Восток
+    "Камчатский край": "Asia/Kamchatka",
+    "Чукотский автономный округ": "Asia/Anadyr",
+    "Магаданская область": "Asia/Magadan",
+    "Сахалинская область": "Asia/Sakhalin",
+    "Приморский край": "Asia/Vladivostok",
+    "Хабаровский край": "Asia/Vladivostok",
+    "Амурская область": "Asia/Yakutsk",
+    "Республика Саха (Якутия)": "Asia/Yakutsk",
+    "Еврейская автономная область": "Asia/Vladivostok",
+    "Забайкальский край": "Asia/Chita",
+
+    # Сибирь
+    "Республика Бурятия": "Asia/Irkutsk",
+    "Иркутская область": "Asia/Irkutsk",
+    "Красноярский край": "Asia/Krasnoyarsk",
+    "Республика Хакасия": "Asia/Krasnoyarsk",
+    "Республика Тыва": "Asia/Krasnoyarsk",
+    "Алтайский край": "Asia/Barnaul",
+    "Республика Алтай": "Asia/Barnaul",
+    "Кемеровская область": "Asia/Novokuznetsk",
+    "Новосибирская область": "Asia/Novosibirsk",
+    "Омская область": "Asia/Omsk",
+    "Томская область": "Asia/Tomsk",
+
+    # Урал
+    "Свердловская область": "Asia/Yekaterinburg",
+    "Челябинская область": "Asia/Yekaterinburg",
+    "Курганская область": "Asia/Yekaterinburg",
+    "Тюменская область": "Asia/Yekaterinburg",
+    "Ханты-Мансийский автономный округ — Югра": "Asia/Yekaterinburg",
+    "Ямало-Ненецкий автономный округ": "Asia/Yekaterinburg",
+
+    # Поволжье
+    "Республика Татарстан": "Europe/Moscow",
+    "Республика Башкортостан": "Asia/Yekaterinburg",
+    "Самарская область": "Europe/Samara",
+    "Саратовская область": "Europe/Saratov",
+    "Ульяновская область": "Europe/Moscow",
+    "Пензенская область": "Europe/Moscow",
+    "Оренбургская область": "Asia/Yekaterinburg",
+    "Пермский край": "Asia/Yekaterinburg",
+    "Кировская область": "Europe/Moscow",
+    "Нижегородская область": "Europe/Moscow",
+    "Республика Марий Эл": "Europe/Moscow",
+    "Республика Мордовия": "Europe/Moscow",
+    "Чувашская Республика": "Europe/Moscow",
+    "Удмуртская Республика": "Europe/Samara",
+
+    # Центр
+    "Москва": "Europe/Moscow",
+    "Московская область": "Europe/Moscow",
+    "Санкт-Петербург": "Europe/Moscow",
+    "Ленинградская область": "Europe/Moscow",
+    "Белгородская область": "Europe/Moscow",
+    "Брянская область": "Europe/Moscow",
+    "Владимирская область": "Europe/Moscow",
+    "Воронежская область": "Europe/Moscow",
+    "Ивановская область": "Europe/Moscow",
+    "Калужская область": "Europe/Moscow",
+    "Костромская область": "Europe/Moscow",
+    "Курская область": "Europe/Moscow",
+    "Липецкая область": "Europe/Moscow",
+    "Орловская область": "Europe/Moscow",
+    "Рязанская область": "Europe/Moscow",
+    "Смоленская область": "Europe/Moscow",
+    "Тамбовская область": "Europe/Moscow",
+    "Тверская область": "Europe/Moscow",
+    "Тульская область": "Europe/Moscow",
+    "Ярославская область": "Europe/Moscow",
+
+    # Северо-Запад
+    "Республика Карелия": "Europe/Moscow",
+    "Республика Коми": "Europe/Moscow",
+    "Архангельская область": "Europe/Moscow",
+    "Вологодская область": "Europe/Moscow",
+    "Мурманская область": "Europe/Moscow",
+    "Новгородская область": "Europe/Moscow",
+    "Псковская область": "Europe/Moscow",
+    "Калининградская область": "Europe/Kaliningrad",
+    "Ненецкий автономный округ": "Europe/Moscow",
+
+    # Юг
+    "Республика Адыгея": "Europe/Moscow",
+    "Республика Калмыкия": "Europe/Moscow",
+    "Краснодарский край": "Europe/Moscow",
+    "Астраханская область": "Europe/Volgograd",
+    "Волгоградская область": "Europe/Volgograd",
+    "Ростовская область": "Europe/Moscow",
+    "Республика Крым": "Europe/Simferopol",
+    "Севастополь": "Europe/Simferopol",
+
+    # Северный Кавказ
+    "Республика Дагестан": "Europe/Moscow",
+    "Республика Ингушетия": "Europe/Moscow",
+    "Кабардино-Балкарская Республика": "Europe/Moscow",
+    "Карачаево-Черкесская Республика": "Europe/Moscow",
+    "Республика Северная Осетия — Алания": "Europe/Moscow",
+    "Чеченская Республика": "Europe/Moscow",
+    "Ставропольский край": "Europe/Moscow",
+
+    # Новые территории
+    "Донецкая Народная Республика": "Europe/Moscow",
+    "Луганская Народная Республика": "Europe/Moscow",
+    "Запорожская область": "Europe/Moscow",
+    "Херсонская область": "Europe/Moscow",
+
+    # По умолчанию
+    None: "Europe/Moscow"
+}
+
+def get_user_timezone(region: str) -> str:
+    return REGION_TIMEZONES.get(region, "Europe/Moscow")
+
+def is_working_hours(region: str) -> bool:
+    if not region:
+        return False
+    tz = pytz.timezone(get_user_timezone(region))
+    now = datetime.now(tz)
+    return time(9, 0) <= now.time() <= time(18, 0) and now.weekday() < 5  # пн-пт
+
 
 # Функции для работы с администраторами
 def load_allowed_admins() -> List[int]:
@@ -405,20 +569,22 @@ def delete_knowledge_fact(fact_id: int, admin_id: int) -> bool:
         conn.rollback()
         return False
         # Функции для работы с отчетами
-def create_report(report_id: str, user_id: int, questions: List[str], week_number: int, year: int) -> None:
+def create_report(report_id: str, user_id: int, questions: List[str], week_number: int, year: int, title: str, interval_minutes: int) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO reports (report_id, user_id, week_number, year, questions, answers, status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                INSERT INTO reports 
+                (report_id, user_id, week_number, year, questions, answers, status, created_at, 
+                 report_title, reminder_interval_minutes, is_reminder_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, %s, TRUE)
                 """,
-                (report_id, user_id, week_number, year, questions, [], 'pending')
+                (report_id, user_id, week_number, year, questions, [], 'pending', title, interval_minutes)
             )
             conn.commit()
-            logger.info(f"Отчет {report_id} создан для пользователя {user_id} на неделю {week_number} {year}")
+            logger.info(f"Отчет {report_id} создан: {title}, интервал {interval_minutes} мин")
     except Exception as e:
-        logger.error(f"Ошибка при создании отчета {report_id} для {user_id}: {str(e)}")
+        logger.error(f"Ошибка при создании отчета {report_id}: {str(e)}")
         conn.rollback()
 
 def update_report_answers(report_id: str, user_id: int, answers: List[str], status: str = 'in_progress') -> bool:
@@ -954,7 +1120,8 @@ async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     keyboard = [
         ['Создать отчет', 'Просмотреть отчеты'],
-        ['Выгрузить отчеты в Excel', 'Назад']
+        ['Выгрузить отчеты в Excel', 'Остановить напоминания'],
+        ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
@@ -1195,6 +1362,52 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 if not result:
                     await query.message.reply_text(f"{user_name}, отчет не найден.", reply_markup=default_reply_markup)
                     return
+
+                elif query.data.startswith("stop_report:"):
+                    report_id = query.data.split(":", 1)[1]
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE reports SET is_reminder_active = FALSE WHERE report_id = %s",
+                                        (report_id,))
+                            conn.commit()
+                        await query.message.reply_text(f"Напоминания остановлены для отчета {report_id}.")
+                    except Exception as e:
+                        await query.message.reply_text("Ошибка.")
+                    return
+
+                elif query.data.startswith("view_by_title:") or query.data.startswith("export_by_title:"):
+                    action = "view" if "view" in query.data else "export"
+                    title = query.data.split(":", 1)[1]
+
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute("""
+                                SELECT report_id, user_id, questions, answers, status, created_at
+                                FROM reports WHERE report_title = %s ORDER BY created_at
+                            """, (title,))
+                            reports = cur.fetchall()
+                    except Exception as e:
+                        await query.message.reply_text("Ошибка.")
+                        return
+
+                    if not reports:
+                        await query.message.reply_text("Нет данных.")
+                        return
+
+                    if action == "view":
+                        text = f"*{title}*\n\n"
+                        for r in reports:
+                            user_name = get_user_name(r[1])
+                            text += f"• {user_name} — {r[4]}\n"
+                        await send_long_text(query, text, parse_mode='Markdown')
+                    else:
+                        output = export_reports_by_title(reports, title)
+                        await query.message.reply_document(
+                            InputFile(output, f"{title.replace(' ', '_')}.xlsx"),
+                            caption=f"Отчет: {title}"
+                        )
+                    return
+
                 questions, answers, status = result
                 if status == 'completed':
                     await query.message.reply_text(f"{user_name}, этот отчет уже заполнен.",
@@ -1283,18 +1496,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if context.user_data.get('awaiting_report_title', False):
         if user_input == "Назад":
             context.user_data.pop('awaiting_report_title', None)
-            context.user_data.pop('current_questions', None)
             await show_reports_menu(update, context)
             return
         report_title = user_input.strip()
         context.user_data['report_title'] = report_title
         context.user_data.pop('awaiting_report_title', None)
+        context.user_data['awaiting_reminder_interval'] = True
+        await update.message.reply_text(
+            f"{user_name}, через сколько минут напоминать?\n(5–360, по умолчанию 60)",
+            reply_markup=ReplyKeyboardMarkup([['60', '30', '120', '360', 'Назад']], resize_keyboard=True)
+        )
+        return
+
+    elif context.user_data.get('awaiting_reminder_interval', False):
+        if user_input == "Назад":
+            context.user_data.pop('awaiting_reminder_interval', None)
+            context.user_data['awaiting_report_title'] = True
+            await update.message.reply_text("Введите название отчета:")
+            return
+        try:
+            interval = int(user_input)
+            if not 5 <= interval <= 360:
+                raise ValueError
+        except:
+            await update.message.reply_text("Введите число от 5 до 360.")
+            return
+        context.user_data['reminder_interval'] = interval
+        context.user_data.pop('awaiting_reminder_interval', None)
         context.user_data['awaiting_report_questions'] = True
         context.user_data['current_questions'] = []
         context.user_data['question_index'] = 1
         await update.message.reply_text(
-            f"{user_name}, введите вопрос 1 (или 'Готово' для завершения):",
-            reply_markup=ReplyKeyboardMarkup([['Готово', 'Назад']], resize_keyboard=True))
+            f"{user_name}, введите вопрос 1 (или 'Готово'):",
+            reply_markup=ReplyKeyboardMarkup([['Готово', 'Назад']], resize_keyboard=True)
+        )
         return
 
     if context.user_data.get('awaiting_report_questions', False):
@@ -1323,7 +1558,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 if recipient_id == user_id:
                     continue
                 try:
-                    create_report(report_id, recipient_id, questions, week_number, year)
+                    interval = context.user_data.get('reminder_interval', 60)
+                    report_title = context.user_data.get('report_title', 'Отчет')
+                    create_report(report_id, recipient_id, questions, week_number, year, report_title, interval)
+
                     reply_markup = InlineKeyboardMarkup([
                         [InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")]
                     ])
@@ -1930,23 +2168,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
-    elif user_input == "Просмотреть отчеты":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать отчеты.",
-                                           reply_markup=default_reply_markup)
-            return
-        context.user_data["awaiting_report_week"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(
-            f"{user_name}, введите номер недели и год (например, '42 2025') для просмотра отчетов:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        elif user_input == "Просмотреть отчеты":
+        await list_reports_by_title(update, context, "view")
         return
 
     elif user_input == "Выгрузить отчеты в Excel":
-        if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
-                                           reply_markup=default_reply_markup)
-            return
+        await list_reports_by_title(update, context, "export")
+        return
+
+    elif user_input == "Остановить напоминания":
+        await stop_reminders(update, context)
+        return
+
         context.user_data["awaiting_export_week"] = True
         context.user_data.pop('awaiting_upload', None)
         await update.message.reply_text(
@@ -2237,31 +2470,48 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # Функция для проверки и отправки напоминаний о просроченных отчетах
 async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
-    overdue_reports = check_overdue_reports()
-    for report in overdue_reports:
-        user_id = report['user_id']
-        report_id = report['report_id']
-        questions = report['questions']
-        user_name = get_user_name(user_id)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT report_id, user_id, questions, reminder_sent_at, reminder_interval_minutes, report_title
+                FROM reports 
+                WHERE status != 'completed' 
+                  AND is_reminder_active = TRUE
+                  AND (reminder_sent_at IS NULL OR reminder_sent_at < NOW() - INTERVAL '1 minute' * reminder_interval_minutes)
+            """)
+            reports = cur.fetchall()
+    except Exception as e:
+        logger.error(f"Ошибка проверки напоминаний: {e}")
+        return
+
+    for row in reports:
+        report_id, user_id, questions, last_sent, interval_min, title = row
+        profile = USER_PROFILES.get(user_id, {})
+        region = profile.get("region")
+
+        if not region or not is_working_hours(region):
+            continue
+
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE reports SET reminder_sent_at = NOW() WHERE report_id = %s AND user_id = %s",
-                    (report_id, user_id)
+                    "UPDATE reports SET reminder_sent_at = NOW() WHERE report_id = %s",
+                    (report_id,)
                 )
                 conn.commit()
-            reply_markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")]
-            ])
+
+            reply_markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("Заполнить отчет", callback_data=f"start_report:{report_id}")
+            ]])
+            user_name = get_user_name(user_id)
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"{user_name}, напоминание: вы не заполнили отчет за неделю {datetime.now().isocalendar().week} {datetime.now().year}:\n\n" + "\n".join(questions),
-                reply_markup=reply_markup
+                text=f"{user_name}, заполните отчет:\n\n*{title}*\n\n" + "\n".join([f"{i+1}. {q}" for i, q in enumerate(questions)]),
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
             )
-            logger.info(f"Напоминание отправлено пользователю {user_id} для отчета {report_id}")
         except Exception as e:
-            logger.error(f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
-
+            logger.error(f"Ошибка отправки напоминания {report_id}: {e}")
 
 # === НОВЫЕ ФУНКЦИИ ДЛЯ АДМИНА: УПРАВЛЕНИЕ АРХИВОМ РЕГИОНОВ ===
 
@@ -2353,6 +2603,84 @@ async def delete_yandex_file(file_path: str) -> bool:
     except Exception as e:
         logger.error(f"Исключение при удалении {file_path}: {str(e)}")
         return False
+
+# === НОВЫЕ ФУНКЦИИ ===
+
+async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if user_id not in ALLOWED_ADMINS:
+        await update.message.reply_text("Только администраторы.")
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT report_id, report_title, week_number, year 
+                FROM reports 
+                WHERE status != 'completed' AND is_reminder_active = TRUE
+                ORDER BY created_at DESC LIMIT 20
+            """)
+            active = cur.fetchall()
+    except Exception as e:
+        await update.message.reply_text("Ошибка БД.")
+        return
+
+    if not active:
+        await update.message.reply_text("Нет активных напоминаний.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(f"{title} (нед {week} {year})", callback_data=f"stop_report:{rid}")]
+        for rid, title, week, year in active
+    ]
+    await update.message.reply_text(
+        "Выберите отчет для остановки напоминаний:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT report_title FROM reports WHERE report_title IS NOT NULL AND report_title != ''")
+            titles = [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        await update.message.reply_text("Ошибка.")
+        return
+
+    if not titles:
+        await update.message.reply_text("Нет отчетов с названиями.")
+        return
+
+    keyboard = [
+        [InlineKeyboardButton(title, callback_data=f"{action}_by_title:{title}")]
+        for title in titles
+    ]
+    await update.message.reply_text(
+        f"Выберите отчет для {'просмотра' if action == 'view' else 'выгрузки'}:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+def export_reports_by_title(reports, title):
+    data = []
+    for r in reports:
+        user_profile = USER_PROFILES.get(r[1], {})
+        row = {
+            'ID': r[0],
+            'Имя': user_profile.get('name', f"ID {r[1]}"),
+            'Регион': user_profile.get('region', '—'),
+            'Статус': r[4],
+            'Создано': r[5].strftime('%Y-%m-%d %H:%M') if r[5] else ''
+        }
+        for i, q in enumerate(r[2], 1):
+            row[f'В{i}'] = q
+            row[f'О{i}'] = r[3][i-1] if i-1 < len(r[3]) else '—'
+        data.append(row)
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    output.seek(0)
+    return output
+
 
 # Основная функция запуска бота
 def main() -> None:
