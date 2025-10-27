@@ -1075,55 +1075,107 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_text(f"{user_name}, ошибка: регион не определён.", reply_markup=default_reply_markup)
         return
 
-    if query.data.startswith("doc_download:") or query.data.startswith("download:"):
+    if query.data.startswith("doc_download:"):
         try:
             file_idx = int(query.data.split(":", 1)[1])
-            if query.data.startswith("doc_download:"):
-                current_path = context.user_data.get('current_path', '/documents/')
-            else:
-                current_path = f"/regions/{profile['region']}/"
-
+            current_path = context.user_data.get('current_path', '/documents/')
             files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
-            context.user_data['file_list'] = files
-            context.user_data['current_path'] = current_path
 
             if file_idx >= len(files):
-                await query.message.reply_text(f"{user_name}, ошибка: файл не найден.",
-                                               reply_markup=default_reply_markup)
-                logger.error(f"Файл с индексом {file_idx} не найден в папке {current_path} для user_id {user_id}")
+                await query.message.reply_text(f"{user_name}, файл не найден.", reply_markup=default_reply_markup)
                 return
 
             file_name = files[file_idx]['name']
             file_path = f"{current_path.rstrip('/')}/{file_name}"
-            logger.info(f"Попытка скачать файл {file_path} для user_id {user_id}")
-
             download_url = get_yandex_disk_file(file_path)
+
             if not download_url:
-                await query.message.reply_text(
-                    f"{user_name}, ошибка: не удалось получить ссылку на файл. Проверьте YANDEX_TOKEN.",
-                    reply_markup=default_reply_markup)
-                logger.error(f"Не удалось получить ссылку для файла {file_path}")
+                await query.message.reply_text(f"{user_name}, не удалось получить файл.", reply_markup=default_reply_markup)
                 return
 
             file_response = requests.get(download_url)
             if file_response.status_code == 200:
                 file_size = len(file_response.content) / (1024 * 1024)
                 if file_size > 20:
-                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).",
-                                                   reply_markup=default_reply_markup)
-                    logger.warning(f"Файл {file_name} слишком большой: {file_size} МБ")
+                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
                     return
-                await query.message.reply_document(document=InputFile(file_response.content, filename=file_name))
-                logger.info(f"Файл {file_name} успешно отправлен пользователю {user_id} из {current_path}")
-            else:
+
+                # === ОТПРАВЛЯЕМ ФАЙЛ ===
+                await query.message.reply_document(
+                    document=InputFile(file_response.content, filename=file_name),
+                    caption=f"_{file_name}_",
+                    parse_mode='Markdown'
+                )
+
+                # === ВОЗВРАЩАЕМ КЛАВИАТУРУ: ФАЙЛЫ + ПАПКИ ===
+                dirs = list_yandex_disk_directories(current_path)
+                keyboard = [[dir_name] for dir_name in dirs]
+                if current_path != '/documents/':
+                    keyboard.append(['Назад'])
+                keyboard.append(['В главное меню'])
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+                # Показываем файлы снова
+                file_keyboard = [
+                    [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
+                    for idx, item in enumerate(files)
+                ]
+                file_reply_markup = InlineKeyboardMarkup(file_keyboard)
+
                 await query.message.reply_text(
-                    f"{user_name}, не удалось загрузить файл. Статус: {file_response.status_code}",
-                    reply_markup=default_reply_markup)
-                logger.error(f"Ошибка загрузки файла {file_path}: статус {file_response.status_code}")
+                    f"{user_name}, файлы в папке *{current_path.rstrip('/').split('/')[-1]}*:",
+                    reply_markup=file_reply_markup,
+                    parse_mode='Markdown'
+                )
+                await query.message.reply_text(
+                    "Выберите папку или действие:",
+                    reply_markup=reply_markup
+                )
+            else:
+                await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
         except Exception as e:
-            await query.message.reply_text(f"{user_name}, ошибка при скачивании: {str(e)}. Проверьте YANDEX_TOKEN.",
-                                           reply_markup=default_reply_markup)
-            logger.error(f"Ошибка при отправке файла: {str(e)}")
+            logger.error(f"Ошибка при скачивании: {str(e)}")
+            await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
+
+    elif query.data.startswith("download:"):
+        # Оставляем как есть (для архива регионов)
+        try:
+            file_idx = int(query.data.split(":", 1)[1])
+            current_path = f"/regions/{profile['region']}/"
+            files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
+            context.user_data['file_list'] = files
+            context.user_data['current_path'] = current_path
+
+            if file_idx >= len(files):
+                await query.message.reply_text(f"{user_name}, ошибка: файл не найден.", reply_markup=default_reply_markup)
+                return
+
+            file_name = files[file_idx]['name']
+            file_path = f"{current_path.rstrip('/')}/{file_name}"
+            download_url = get_yandex_disk_file(file_path)
+
+            if not download_url:
+                await query.message.reply_text(f"{user_name}, ошибка: не удалось получить файл.", reply_markup=default_reply_markup)
+                return
+
+            file_response = requests.get(download_url)
+            if file_response.status_code == 200:
+                file_size = len(file_response.content) / (1024 * 1024)
+                if file_size > 20:
+                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
+                    return
+
+                await query.message.reply_document(
+                    document=InputFile(file_response.content, filename=file_name),
+                    caption=f"_{file_name}_",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании из региона: {str(e)}")
+            await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
+
     elif query.data.startswith("start_report:"):
         report_id = query.data.split(":", 1)[1]
         try:
@@ -1992,6 +2044,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     elif context.user_data.get('current_mode') == 'documents_nav':
         current_path = context.user_data.get('current_path', '/documents/')
+
+        # Защита: если ввели несуществующую папку
+        available_dirs = list_yandex_disk_directories(current_path)
+        if user_input not in available_dirs and user_input not in ["Назад", "В главное меню"]:
+            await update.message.reply_text(
+                f"{user_name}, выберите папку из списка ниже.",
+                reply_markup=default_reply_markup
+            )
+            return
 
         if user_input == "В главное меню":
             context.user_data.pop('current_mode', None)
