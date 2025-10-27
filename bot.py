@@ -2156,35 +2156,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
         return
 
-    elif user_input == "Создать отчет":
+        elif user_input == "Создать отчет":
         if user_id not in ALLOWED_ADMINS:
-            await update.message.reply_text(f"{user_name}, только администраторы могут создавать отчеты.",
-                                           reply_markup=default_reply_markup)
+            await update.message.reply_text(
+                f"{user_name}, только администраторы могут создавать отчеты.",
+                reply_markup=default_reply_markup
+            )
             return
+
         context.user_data['awaiting_report_title'] = True
         context.user_data['current_questions'] = []
         await update.message.reply_text(
             f"{user_name}, введите название отчета (например, 'Прогнозная информация по мероприятиям на этой неделе'):",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
+        )
         return
 
-        elif user_input == "Просмотреть отчеты":
+    elif user_input == "Просмотреть отчеты":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(
+                f"{user_name}, только администраторы могут просматривать отчеты.",
+                reply_markup=default_reply_markup
+            )
+            return
         await list_reports_by_title(update, context, "view")
         return
 
     elif user_input == "Выгрузить отчеты в Excel":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(
+                f"{user_name}, только администраторы могут выгружать отчеты.",
+                reply_markup=default_reply_markup
+            )
+            return
         await list_reports_by_title(update, context, "export")
         return
 
     elif user_input == "Остановить напоминания":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(
+                f"{user_name}, только администраторы могут останавливать напоминания.",
+                reply_markup=default_reply_markup
+            )
+            return
         await stop_reminders(update, context)
-        return
-
-        context.user_data["awaiting_export_week"] = True
-        context.user_data.pop('awaiting_upload', None)
-        await update.message.reply_text(
-            f"{user_name}, введите номер недели и год (например, '42 2025') для выгрузки отчетов в Excel:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
     elif context.user_data.get("awaiting_report_week", False):
