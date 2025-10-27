@@ -1286,17 +1286,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('current_questions', None)
             await show_reports_menu(update, context)
             return
-
-        async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            user_id = update.effective_user.id
-            user_input = update.message.text.strip()
-
-            # === ПРОВЕРКА НА ПЕРЕНАПРАВЛЕНИЕ ИЗ АДМИНКИ ===
-            if context.user_data.get('admin_panel_redirect'):
-                user_input = context.user_data.pop('admin_panel_redirect')  # Берём нужный текст
-                update.message.text = user_input  # Теперь можно — мы сами создаём копию
-            # === КОНЕЦ ДОБАВЛЕНИЯ ===
-
         report_title = user_input.strip()
         context.user_data['report_title'] = report_title
         context.user_data.pop('awaiting_report_title', None)
@@ -2274,218 +2263,111 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.error(f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
 
 
-# === НОВАЯ АДМИН-ПАНЕЛЬ + РЕЙТИНГ АКТИВНОСТИ ===
+# === НОВЫЕ ФУНКЦИИ ДЛЯ АДМИНА: УПРАВЛЕНИЕ АРХИВОМ РЕГИОНОВ ===
 
-# Кэш статистики (обновляется раз в 60 сек)
-LAST_STATS_UPDATE = 0
-STATS_CACHE = {}
-
-async def update_stats_cache() -> Dict:
-    global LAST_STATS_UPDATE, STATS_CACHE
-    now = datetime.now().timestamp()
-    if now - LAST_STATS_UPDATE < 60:
-        return STATS_CACHE
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM allowed_users")
-            users_count = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM allowed_admins")
-            admins_count = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM knowledge_base")
-            facts_count = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM reports WHERE week_number = %s AND year = %s",
-                        (datetime.now().isocalendar().week, datetime.now().year))
-            reports_this_week = cur.fetchone()[0]
-
-            cur.execute("SELECT COUNT(*) FROM request_logs")
-            total_requests = cur.fetchone()[0]
-
-            # Топ-10 активных
-            cur.execute("""
-                SELECT user_id, COUNT(*) as cnt 
-                FROM request_logs 
-                GROUP BY user_id 
-                ORDER BY cnt DESC 
-                LIMIT 10
-            """)
-            top_users = []
-            for row in cur.fetchall():
-                user_id, cnt = row
-                profile = USER_PROFILES.get(user_id, {})
-                name = profile.get("name") or f"ID {user_id}"
-                region = profile.get("region") or "—"
-                top_users.append(f"• {name} ({region}) — {cnt} сообщений")
-
-        STATS_CACHE = {
-            "users": users_count,
-            "admins": admins_count,
-            "facts": facts_count,
-            "reports_week": reports_this_week,
-            "total_requests": total_requests,
-            "top_users": top_users or ["Пока нет активности"]
-        }
-        LAST_STATS_UPDATE = now
-    except Exception as e:
-        logger.error(f"Ошибка обновления статистики: {e}")
-        STATS_CACHE = {"error": "Не удалось загрузить статистику"}
-
-    return STATS_CACHE
-
-async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_regions_list(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
+    """Показывает список регионов для скачивания/удаления файлов"""
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_ADMINS:
-        await update.message.reply_text("Доступ запрещён.")
+    user_name = get_user_name(user_id)
+
+    # Получаем все уникальные регионы из профилей
+    regions = sorted({profile['region'] for profile in USER_PROFILES.values() if profile.get('region')})
+    if not regions:
+        await update.message.reply_text(f"{user_name}, нет зарегистрированных регионов.")
         return
 
-    stats = await update_stats_cache()
-    top_text = "\n".join(stats.get("top_users", [])[:5])  # Первые 5
-
-    text = f"""
-*АДМИН-ПАНЕЛЬ ВСКС*
-
-*Статистика*
-┌ Пользователи: `{stats.get('users', 0)}`
-└ Админы: `{stats.get('admins', 0)}`
-
-┌ Отчёты (неделя): `{stats.get('reports_week', 0)}`
-└ Факты: `{stats.get('facts', 0)}`
-
-*Топ активных (сообщения):*
-{top_text}
-
-*Выберите действие:*
-"""
-
-    keyboard = [
-        ["Пользователи", "Администраторы"],
-        ["Отчёты", "Рассылки"],
-        ["База знаний", "Файлы"],
-        ["Рейтинг активности", "Статистика"],
-        ["Выйти из админки"]
-    ]
+    keyboard = [[region] for region in regions]
+    keyboard.append(['Назад'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
-    context.user_data['in_admin_panel'] = True
 
-async def show_full_ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ALLOWED_ADMINS:
-        return
+    context.user_data['admin_archive_action'] = action  # 'download' или 'delete'
+    context.user_data['awaiting_region_selection'] = True
 
-    stats = await update_stats_cache()
-    ranking = "\n".join(stats.get("top_users", []))
-
+    action_text = "скачать" if action == "download" else "удалить"
     await update.message.reply_text(
-        f"*ТОП-10 АКТИВНЫХ ПОЛЬЗОВАТЕЛЕЙ*\n\n{ranking}\n\n_По количеству сообщений_",
-        parse_mode='Markdown',
-        reply_markup=ReplyKeyboardMarkup([["Назад в админку"]], resize_keyboard=True)
+        f"{user_name}, выберите регион, из которого хотите {action_text} файл:",
+        reply_markup=reply_markup
     )
 
-async def show_full_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def show_region_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает файлы в выбранном регионе"""
     user_id = update.effective_user.id
-    if user_id not in ALLOWED_ADMINS:
+    user_name = get_user_name(user_id)
+    region = context.user_data.get('selected_region')
+    action = context.user_data.get('admin_archive_action')
+
+    if not region:
+        await update.message.reply_text(f"{user_name}, регион не выбран.")
         return
 
-    stats = await update_stats_cache()
-    await update.message.reply_text(
-        f"""
-*ПОЛНАЯ СТАТИСТИКА*
+    folder_path = f"/regions/{region}/"
+    create_yandex_folder(folder_path)
+    files = list_yandex_disk_files(folder_path)
 
-• Пользователи: `{stats.get('users', 0)}`
-• Администраторы: `{stats.get('admins', 0)}`
-• Факты в базе: `{stats.get('facts', 0)}`
-• Отчёты (текущая неделя): `{stats.get('reports_week', 0)}`
-• Всего запросов: `{stats.get('total_requests', 0)}`
-        """.strip(),
-        parse_mode='Markdown',
-        reply_markup=ReplyKeyboardMarkup([["Назад в админку"]], resize_keyboard=True)
-    )
+    if not files:
+        await update.message.reply_text(f"{user_name}, в папке региона *{region}* нет файлов.", parse_mode='Markdown')
+        context.user_data.pop('awaiting_region_selection', None)
+        context.user_data.pop('selected_region', None)
+        context.user_data.pop('admin_archive_action', None)
+        return
 
-# === ОБРАБОТКА СООБЩЕНИЙ В АДМИН-ПАНЕЛИ (ФИНАЛЬНАЯ ВЕРСИЯ) ===
-async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_input = update.message.text.strip()
+    context.user_data['admin_region_files'] = files
+    context.user_data['current_path'] = folder_path
 
-    if not context.user_data.get('in_admin_panel'):
+    if action == "download":
+        file_keyboard = [
+            [InlineKeyboardButton(item['name'], callback_data=f"admin_download:{idx}")]
+            for idx, item in enumerate(files)
+        ]
+        reply_markup = InlineKeyboardMarkup(file_keyboard)
+        await update.message.reply_text(
+            f"*{region}* — выберите файл для скачивания:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    else:  # delete
+        keyboard = [[item['name']] for item in files]
+        keyboard.append(['Назад'])
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            f"*{region}* — выберите файл для удаления:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+
+async def delete_yandex_file(file_path: str) -> bool:
+    """Удаляет файл с Яндекс.Диска"""
+    encoded_path = quote(file_path, safe='/')
+    url = f'https://cloud-api.yandex.net/v1/disk/resources?path={encoded_path}'
+    headers = {'Authorization': f'OAuth {YANDEX_TOKEN}'}
+    try:
+        response = requests.delete(url, headers=headers)
+        if response.status_code == 204:
+            logger.info(f"Файл удалён: {file_path}")
+            return True
+        else:
+            logger.error(f"Ошибка удаления файла {file_path}: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Исключение при удалении {file_path}: {str(e)}")
         return False
-
-    # === ВЫХОД И НАЗАД ===
-    if user_input == "Выйти из админки":
-        context.user_data.pop('in_admin_panel', None)
-        await show_main_menu(update, context)
-        return True
-
-    if user_input == "Назад в админку":
-        await show_admin_panel(update, context)
-        return True
-
-    # === РЕЙТИНГ И СТАТИСТИКА ===
-    if user_input == "Рейтинг активности":
-        await show_full_ranking(update, context)
-        return True
-
-    if user_input == "Статистика":
-        await show_full_stats(update, context)
-        return True
-
-    # === ПЕРЕНАПРАВЛЕНИЕ ЧЕРЕЗ ФЛАГ (БЕЗ ИЗМЕНЕНИЯ TEXT) ===
-    mapping = {
-        "Пользователи": "Управление пользователями",
-        "Администраторы": "Управление пользователями",
-        "Отчёты": "Отчеты",
-        "Рассылки": "Рассылки",
-        "База знаний": "Управление фактами",
-        "Файлы": "Файлы из папок",
-    }
-
-    if user_input in mapping:
-        # Устанавливаем флаг, что мы из админки
-        context.user_data['admin_panel_redirect'] = mapping[user_input]
-        context.user_data['in_admin_panel'] = False  # Временно выходим
-        await handle_message(update, context)
-        context.user_data['in_admin_panel'] = True  # Возвращаемся
-        return True
-
-    return False
-
-# === ВСЁ, ЧТО ВЫШЕ — ТВОЙ СТАРЫЙ КОД + АДМИН-ПАНЕЛЬ ===
 
 # Основная функция запуска бота
 def main() -> None:
     try:
         application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-        # === НОВЫЕ КОМАНДЫ ===
-        application.add_handler(CommandHandler("admin", show_admin_panel))
-
-        # === СТАРЫЕ ХЕНДЛЕРЫ ===
         application.add_handler(CommandHandler("start", send_welcome))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
-
-        # === ПЕРЕХВАТ СООБЩЕНИЙ В АДМИН-ПАНЕЛИ ДО НЕЙРОНКИ ===
-        async def admin_panel_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if context.user_data.get('in_admin_panel'):
-                return await handle_admin_panel_message(update, context)
-            return False
-
-        # Добавляем фильтр ПЕРЕД основным handle_message
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel_filter), group=0)
-
-        # Основной обработчик сообщений (после админки)
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-        application.job_queue.run_repeating(check_reminders, interval=21600, first=60)
-        logger.info("Бот запущен с АДМИН-ПАНЕЛЬЮ и РЕЙТИНГОМ...")
+        application.job_queue.run_repeating(check_reminders, interval=21600, first=60)  # Каждые 6 часов
+        logger.info("Бот запущен, начинаю polling...")
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
 
-# ЭТОТ БЛОК ДОЛЖЕН БЫТЬ В САМОМ КОНЦЕ ФАЙЛА!
 if __name__ == '__main__':
     main()
