@@ -987,35 +987,59 @@ async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение содержимого папки в /documents/
+
+# === ВСТАВЬ ЭТУ ФУНКЦИЮ ВМЕСТО СТАРОЙ show_current_docs ===
 async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
+
+    # Сброс списка файлов при входе в новую папку
     context.user_data.pop('file_list', None)
+
     current_path = context.user_data.get('current_path', '/documents/')
     folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
-    if not create_yandex_folder(current_path):
-        logger.warning(f"Не удалось создать папку {current_path}, возможно, она уже существует или проблема с токеном.")
+
+    # НЕ создаём папку автоматически — только если она уже есть
+    # create_yandex_folder(current_path)  # УДАЛИ ЭТУ СТРОКУ!
+
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
-    logger.info(f"Пользователь {user_id} в папке {current_path}, найдено файлов: {len(files)}, папок: {len(dirs)}")
+
+    logger.info(f"Пользователь {user_id} в папке {current_path}, файлов: {len(files)}, папок: {len(dirs)}")
+
+    # Клавиатура с папками
     keyboard = [[dir_name] for dir_name in dirs]
     if current_path != '/documents/':
         keyboard.append(['Назад'])
     keyboard.append(['В главное меню'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
     if files:
         context.user_data['file_list'] = files
         context.user_data['current_path'] = current_path
-        file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")] for idx, item in
-                         enumerate(files)]
+        file_keyboard = [
+            [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
+            for idx, item in enumerate(files)
+        ]
         file_reply_markup = InlineKeyboardMarkup(file_keyboard)
-        await update.message.reply_text(f"{user_name}, файлы в папке {folder_name}:", reply_markup=file_reply_markup)
+        await update.message.reply_text(
+            f"{user_name}, файлы в папке *{folder_name}*:",
+            reply_markup=file_reply_markup,
+            parse_mode='Markdown'
+        )
     elif dirs:
-        if not is_return:
-            message = "Документы для РО" if current_path == '/documents/' else f"Папки в {folder_name}:"
-            await update.message.reply_text(f"{user_name}, {message}", reply_markup=reply_markup)
+        message = "Документы для РО" if current_path == '/documents/' else f"Папки в *{folder_name}*:"
+        await update.message.reply_text(
+            f"{user_name}, {message}",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
     else:
-        await update.message.reply_text(f"{user_name}, папка {folder_name} пуста.", reply_markup=reply_markup)
+        await update.message.reply_text(
+            f"{user_name}, папка *{folder_name}* пуста.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
 
 # Отображение файлов в папке региона
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1968,12 +1992,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     elif context.user_data.get('current_mode') == 'documents_nav':
         current_path = context.user_data.get('current_path', '/documents/')
+
         if user_input == "В главное меню":
             context.user_data.pop('current_mode', None)
             context.user_data.pop('current_path', None)
             context.user_data.pop('file_list', None)
             await show_main_menu(update, context)
             return
+
         elif user_input == "Назад":
             if current_path == '/documents/':
                 context.user_data.pop('current_mode', None)
@@ -1985,17 +2011,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 context.user_data['current_path'] = parent_path
                 await show_current_docs(update, context, is_return=True)
             return
+
         else:
-            new_path = f"{current_path.rstrip('/')}/{user_input}/"
-            if create_yandex_folder(new_path):
-                context.user_data['current_path'] = new_path
+            # ПРОВЕРЯЕМ: существует ли папка на Яндекс.Диске?
+            potential_path = f"{current_path.rstrip('/')}/{user_input}/"
+            dirs = list_yandex_disk_directories(current_path)
+            if user_input in dirs:
+                context.user_data['current_path'] = potential_path
+                context.user_data.pop('file_list', None)  # Очищаем старый список
                 await show_current_docs(update, context)
             else:
                 await update.message.reply_text(
-                    f"{user_name}, ошибка при переходе в папку {user_input}.",
-                    reply_markup=default_reply_markup
+                    f"{user_name}, папка *{user_input}* не найдена или недоступна.",
+                    reply_markup=context.user_data.get('default_reply_markup'),
+                    parse_mode='Markdown'
                 )
             return
+
 
     else:
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
