@@ -2156,14 +2156,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.info(f"Администратор {user_id} запросил удаление факта. Показаны факты.")
         return
 
-        elif user_input == "Создать отчет":
+    # === Исправленный блок: правильный уровень отступов ===
+    elif user_input == "Создать отчет":
         if user_id not in ALLOWED_ADMINS:
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут создавать отчеты.",
                 reply_markup=default_reply_markup
             )
             return
-
         context.user_data['awaiting_report_title'] = True
         context.user_data['current_questions'] = []
         await update.message.reply_text(
