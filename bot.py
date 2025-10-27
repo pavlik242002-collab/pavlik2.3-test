@@ -1377,34 +1377,43 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
                 elif query.data.startswith("view_by_title:") or query.data.startswith("export_by_title:"):
                     action = "view" if "view" in query.data else "export"
-                    title = query.data.split(":", 1)[1]
+                    safe_title = query.data.split(":", 1)[1]
+                    user_name = get_user_name(update.effective_user.id)
+                    logger.info(f"Обработка callback: action={action}, safe_title={safe_title}")
 
                     try:
                         with conn.cursor() as cur:
+                            # Ищем отчеты, где report_title начинается с safe_title
                             cur.execute("""
-                                SELECT report_id, user_id, questions, answers, status, created_at
-                                FROM reports WHERE report_title = %s ORDER BY created_at
-                            """, (title,))
+                                SELECT report_id, user_id, questions, answers, status, created_at, report_title
+                                FROM reports 
+                                WHERE report_title LIKE %s 
+                                ORDER BY created_at
+                            """, (safe_title + '%',))
                             reports = cur.fetchall()
+                            logger.info(f"Найдено {len(reports)} отчетов для safe_title={safe_title}")
                     except Exception as e:
-                        await query.message.reply_text("Ошибка.")
+                        logger.error(f"Ошибка при получении отчетов: {str(e)}")
+                        await query.message.reply_text(f"{user_name}, ошибка при получении отчетов: {str(e)}.")
                         return
 
                     if not reports:
-                        await query.message.reply_text("Нет данных.")
+                        logger.info(f"Отчеты не найдены для safe_title={safe_title}")
+                        await query.message.reply_text(f"{user_name}, отчеты с названием '{safe_title}' не найдены.")
                         return
 
                     if action == "view":
-                        text = f"*{title}*\n\n"
+                        text = f"*{reports[0][6]}*\n\n"  # Используем полное название из первого отчета
                         for r in reports:
-                            user_name = get_user_name(r[1])
-                            text += f"• {user_name} — {r[4]}\n"
+                            user_name_report = get_user_name(r[1])
+                            text += f"• {user_name_report} — {r[4]}\n"
                         await send_long_text(query, text, parse_mode='Markdown')
                     else:
-                        output = export_reports_by_title(reports, title)
+                        output = export_reports_by_title(reports, reports[0][6])  # Полное название
+                        safe_file_name = reports[0][6][:20].replace(' ', '_').replace(':', '') + '.xlsx'
                         await query.message.reply_document(
-                            InputFile(output, f"{title.replace(' ', '_')}.xlsx"),
-                            caption=f"Отчет: {title}"
+                            InputFile(output, safe_file_name),
+                            caption=f"{user_name}, отчет: {reports[0][6]}"
                         )
                     return
 
@@ -2653,27 +2662,48 @@ async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+
 async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
+    user_id = update.effective_user.id
+    user_name = get_user_name(user_id)
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT report_title FROM reports WHERE report_title IS NOT NULL AND report_title != ''")
+            cur.execute(
+                "SELECT DISTINCT report_title FROM reports WHERE report_title IS NOT NULL AND report_title != ''")
             titles = [row[0] for row in cur.fetchall()]
+            logger.info(f"Найдено {len(titles)} названий отчетов для пользователя {user_id}")
     except Exception as e:
-        await update.message.reply_text("Ошибка.")
+        logger.error(f"Ошибка при получении названий отчетов: {str(e)}")
+        await update.message.reply_text(f"{user_name}, ошибка при получении названий отчетов: {str(e)}.")
         return
 
     if not titles:
-        await update.message.reply_text("Нет отчетов с названиями.")
+        logger.info(f"Нет отчетов с названиями для пользователя {user_id}")
+        await update.message.reply_text(f"{user_name}, нет отчетов с названиями.")
         return
 
-    keyboard = [
-        [InlineKeyboardButton(title, callback_data=f"{action}_by_title:{title}")]
-        for title in titles
-    ]
-    await update.message.reply_text(
-        f"Выберите отчет для {'просмотра' if action == 'view' else 'выгрузки'}:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    keyboard = []
+    for title in titles:
+        # Укорачиваем title, чтобы callback_data не превышал 64 байта
+        safe_title = title[:20].replace(':', '').replace('\n', ' ')  # Удаляем проблемные символы
+        callback = f"{action}_by_title:{safe_title}"
+        if len(callback.encode('utf-8')) > 64:
+            logger.warning(f"callback_data слишком длинное, обрезаю: {callback}")
+            safe_title = safe_title[:10]  # Еще сильнее укорачиваем
+            callback = f"{action}_by_title:{safe_title}"
+        logger.info(f"Создаю кнопку: {title} -> callback: {callback}")
+        keyboard.append([InlineKeyboardButton(title, callback_data=callback)])
+
+    try:
+        await update.message.reply_text(
+            f"{user_name}, выберите отчет для {'просмотра' if action == 'view' else 'выгрузки'}:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке сообщения с кнопками: {str(e)}")
+        await update.message.reply_text(f"{user_name}, ошибка при отображении кнопок: {str(e)}.")
 
 def export_reports_by_title(reports, title):
     data = []
@@ -2692,7 +2722,8 @@ def export_reports_by_title(reports, title):
         data.append(row)
     df = pd.DataFrame(data)
     output = BytesIO()
-    df.to_excel(output, index=False, engine='openpyxl')
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=title[:31])  # Ограничиваем длину имени листа
     output.seek(0)
     return output
 
