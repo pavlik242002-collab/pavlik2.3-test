@@ -2400,15 +2400,26 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
     user_input = update.message.text.strip()
 
     if not context.user_data.get('in_admin_panel'):
-        return False  # Не в админке
+        return False
 
+    # === ВЫХОД И НАЗАД ===
     if user_input == "Выйти из админки":
         context.user_data.pop('in_admin_panel', None)
+        await show_admin_panel(update, context)  # Обновим панель
         await show_main_menu(update, context)
         return True
 
     if user_input == "Назад в админку":
         await show_admin_panel(update, context)
+        return True
+
+    # === РЕЙТИНГ И СТАТИСТИКА ===
+    if user_input == "Рейтинг активности":
+        await show_full_ranking(update, context)
+        return True
+
+    if user_input == "Статистика":
+        await show_full_stats(update, context)
         return True
 
     # === ПЕРЕНАПРАВЛЕНИЕ НА СТАРЫЕ ФУНКЦИИ ===
@@ -2424,18 +2435,11 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
     if user_input in mapping:
         # Имитируем нажатие старой кнопки
         update.message.text = mapping[user_input]
-        context.user_data.pop('in_admin_panel', None)  # Выходим из панели
+        context.user_data['in_admin_panel'] = True  # Остаёмся в админке
         await handle_message(update, context)
         return True
 
-    if user_input == "Рейтинг активности":
-        await show_full_ranking(update, context)
-        return True
-
-    if user_input == "Статистика":
-        await show_full_stats(update, context)
-        return True
-
+    # Если ничего не подошло — игнорируем
     return False
 
 # === ВСЁ, ЧТО ВЫШЕ — ТВОЙ СТАРЫЙ КОД + АДМИН-ПАНЕЛЬ ===
