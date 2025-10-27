@@ -1365,14 +1365,24 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
                 elif query.data.startswith("stop_report:"):
                     report_id = query.data.split(":", 1)[1]
+                    user_name = get_user_name(update.effective_user.id)
+                    logger.info(
+                        f"Попытка остановки напоминаний для отчета {report_id} пользователем {update.effective_user.id}")
                     try:
                         with conn.cursor() as cur:
                             cur.execute("UPDATE reports SET is_reminder_active = FALSE WHERE report_id = %s",
                                         (report_id,))
+                            if cur.rowcount == 0:
+                                logger.warning(f"Отчет {report_id} не найден или уже неактивен")
+                                await query.message.reply_text(
+                                    f"{user_name}, отчет не найден или напоминания уже остановлены.")
+                                return
                             conn.commit()
-                        await query.message.reply_text(f"Напоминания остановлены для отчета {report_id}.")
+                        await query.message.reply_text(f"{user_name}, напоминания остановлены для отчета {report_id}.")
+                        logger.info(f"Напоминания успешно остановлены для отчета {report_id}")
                     except Exception as e:
-                        await query.message.reply_text("Ошибка.")
+                        logger.error(f"Ошибка при остановке напоминаний для отчета {report_id}: {str(e)}")
+                        await query.message.reply_text(f"{user_name}, ошибка при остановке напоминаний: {str(e)}.")
                     return
 
                 elif query.data.startswith("view_by_title:") or query.data.startswith("export_by_title:"):
@@ -2632,8 +2642,9 @@ async def delete_yandex_file(file_path: str) -> bool:
 
 async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    user_name = get_user_name(user_id)
     if user_id not in ALLOWED_ADMINS:
-        await update.message.reply_text("Только администраторы.")
+        await update.message.reply_text(f"{user_name}, только администраторы могут останавливать напоминания.")
         return
 
     try:
@@ -2645,22 +2656,42 @@ async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 ORDER BY created_at DESC LIMIT 20
             """)
             active = cur.fetchall()
+            logger.info(f"Найдено {len(active)} активных отчетов с напоминаниями для админа {user_id}")
     except Exception as e:
-        await update.message.reply_text("Ошибка БД.")
+        logger.error(f"Ошибка при получении активных отчетов: {str(e)}")
+        await update.message.reply_text(f"{user_name}, ошибка базы данных: {str(e)}.")
         return
 
     if not active:
-        await update.message.reply_text("Нет активных напоминаний.")
+        await update.message.reply_text(f"{user_name}, нет активных напоминаний.")
         return
 
-    keyboard = [
-        [InlineKeyboardButton(f"{title} (нед {week} {year})", callback_data=f"stop_report:{rid}")]
-        for rid, title, week, year in active
-    ]
-    await update.message.reply_text(
-        "Выберите отчет для остановки напоминаний:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    keyboard = []
+    for report_id, title, week, year in active:
+        # Формируем текст кнопки
+        button_text = f"{title} (нед {week} {year})"[:50]  # Ограничиваем длину текста кнопки
+        callback = f"stop_report:{report_id}"
+        # Проверяем длину callback_data
+        if len(callback.encode('utf-8')) > 64:
+            logger.error(f"callback_data слишком длинное для report_id={report_id}: {callback}")
+            continue  # Пропускаем кнопку, если callback_data слишком длинное
+        logger.info(f"Создаю кнопку: text='{button_text}', callback='{callback}'")
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback)])
+
+    if not keyboard:
+        await update.message.reply_text(f"{user_name}, не удалось создать кнопки для остановки напоминаний.")
+        return
+
+    try:
+        await update.message.reply_text(
+            f"{user_name}, выберите отчет для остановки напоминаний:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при отправке сообщения с кнопками: {str(e)}")
+        await update.message.reply_text(
+            f"{user_name}, ошибка при отображении списка отчетов: {str(e)}."
+        )
 
 
 async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
