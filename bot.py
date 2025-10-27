@@ -1092,22 +1092,23 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     return
 
                 # === ОТПРАВЛЯЕМ ФАЙЛ ===
+
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
 
-                # === ТОЛЬКО 2 КНОПКИ ПОСЛЕ СКАЧИВАНИЯ ===
+                # === ТОЛЬКО 2 КНОПКИ: БЕЗ ТЕКСТА ===
                 keyboard = []
                 if context.user_data.get('current_path', '/documents/') != '/documents/':
                     keyboard.append(['Назад'])
                 keyboard.append(['В главное меню'])
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                # === ТОЛЬКО КЛАВИАТУРА БЕЗ ТЕКСТА ===
-                await query.message.reply_text(
-                    "",  # Невидимый символ
-                    reply_markup=reply_markup
-                )
+                # === ОТПРАВЛЯЕМ ПУСТОЕ СООБЩЕНИЕ С КНОПКАМИ ===
+                try:
+                    await query.message.reply_text("\u200B", reply_markup=reply_markup)
+                except Exception as e:
+                    logger.warning(f"Ошибка при показе клавиатуры после файла: {e}")
 
         elif query.data.startswith("download:"):
             file_idx = int(query.data.split(":", 1)[1])
@@ -1143,15 +1144,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     document=InputFile(file_response.content, filename=file_name)
                 )
 
-                # === ТОЛЬКО 2 КНОПКИ ПОСЛЕ СКАЧИВАНИЯ ===
-                keyboard = [['Назад'], ['В главное меню']]  # В архиве нет вложенных папок
+                # === ТОЛЬКО 2 КНОПКИ: БЕЗ ТЕКСТА ===
+                keyboard = [['Назад'], ['В главное меню']]
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                # === ТОЛЬКО КЛАВИАТУРА БЕЗ ТЕКСТА ===
-                await query.message.reply_text(
-                    "",  # Невидимый символ (zero-width space)
-                    reply_markup=reply_markup
-                )
+                # === ОТПРАВЛЯЕМ ПУСТОЕ СООБЩЕНИЕ С КНОПКАМИ ===
+                try:
+                    await query.message.reply_text("\u200B", reply_markup=reply_markup)
+                except Exception as e:
+                    logger.warning(f"Ошибка при показе клавиатуры после файла: {e}")
 
         elif query.data.startswith("start_report:"):
             report_id = query.data.split(":", 1)[1]
@@ -1987,13 +1988,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Назад":
-        context.user_data.pop('awaiting_upload', None)
-        context.user_data.pop('awaiting_fact_id', None)
-        context.user_data.pop('awaiting_delete_user_id', None)
-        context.user_data.pop('awaiting_delete_admin_id', None)
-        context.user_data.pop('awaiting_new_fact', None)
-        context.user_data.pop('awaiting_broadcast', None)
-        context.user_data.pop('broadcast_type', None)
         if context.user_data.get('current_mode') == 'documents_nav':
             current_path = context.user_data.get('current_path', '/documents/')
             if current_path == '/documents/':
