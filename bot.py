@@ -991,7 +991,6 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
 
-    context.user_data.pop('file_list', None)
     current_path = context.user_data.get('current_path', '/documents/')
     folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
 
@@ -1005,9 +1004,11 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard.append(['В главное меню'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+    # === ВСЕГДА СОХРАНЯЕМ ПУТЬ И ФАЙЛЫ ===
+    context.user_data['current_path'] = current_path
+    context.user_data['file_list'] = files
+
     if files:
-        context.user_data['file_list'] = files
-        context.user_data['current_path'] = current_path
         file_keyboard = [
             [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
             for idx, item in enumerate(files)
@@ -1024,7 +1025,6 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-
 
 # Отображение файлов в папке региона
 async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1093,7 +1093,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     parse_mode='Markdown'
                 )
 
-                # === ВОЗВРАЩАЕМ КЛАВИАТУРУ ПАПОК (без файлов) ===
+                # === СОХРАНЯЕМ ПУТЬ И ПОКАЗЫВАЕМ ПАПКИ ===
+                context.user_data['current_path'] = current_path
                 dirs = list_yandex_disk_directories(current_path)
                 keyboard = [[dir_name] for dir_name in dirs]
                 if current_path != '/documents/':
