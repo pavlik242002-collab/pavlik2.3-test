@@ -1100,7 +1100,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 keyboard.append(['В главное меню'])
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                await query.message.reply_text("📁", reply_markup=reply_markup)
+                await query.message.reply_text(reply_markup=reply_markup)
 
             else:
                 await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
