@@ -1136,9 +1136,72 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 )
                 pass
 
-    elif query.data.startswith("start_report:"):
-        report_id = query.data.split(":", 1)[1]
-        try:
+
+    try:
+        if query.data.startswith("doc_download:"):
+            file_idx = int(query.data.split(":", 1)[1])
+            current_path = context.user_data.get('current_path', '/documents/')
+            files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
+
+            if file_idx >= len(files):
+                await query.message.reply_text(f"{user_name}, файл не найден.", reply_markup=default_reply_markup)
+                return
+
+            file_name = files[file_idx]['name']
+            file_path = f"{current_path.rstrip('/')}/{file_name}"
+            download_url = get_yandex_disk_file(file_path)
+
+            if not download_url:
+                await query.message.reply_text(f"{user_name}, не удалось получить файл.", reply_markup=default_reply_markup)
+                return
+
+            file_response = requests.get(download_url)
+            if file_response.status_code == 200:
+                file_size = len(file_response.content) / (1024 * 1024)
+                if file_size > 20:
+                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
+                    return
+
+                await query.message.reply_document(
+                    document=InputFile(file_response.content, filename=file_name)
+                )
+                pass
+            else:
+                await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
+
+        elif query.data.startswith("download:"):
+            file_idx = int(query.data.split(":", 1)[1])
+            current_path = f"/regions/{profile['region']}/"
+            files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
+            context.user_data['file_list'] = files
+            context.user_data['current_path'] = current_path
+
+            if file_idx >= len(files):
+                await query.message.reply_text(f"{user_name}, ошибка: файл не найден.", reply_markup=default_reply_markup)
+                return
+
+            file_name = files[file_idx]['name']
+            file_path = f"{current_path.rstrip('/')}/{file_name}"
+            download_url = get_yandex_disk_file(file_path)
+
+            if not download_url:
+                await query.message.reply_text(f"{user_name}, ошибка: не удалось получить файл.", reply_markup=default_reply_markup)
+                return
+
+            file_response = requests.get(download_url)
+            if file_response.status_code == 200:
+                file_size = len(file_response.content) / (1024 * 1024)
+                if file_size > 20:
+                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup)
+                    return
+
+                await query.message.reply_document(
+                    document=InputFile(file_response.content, filename=file_name)
+                )
+                pass
+
+        elif query.data.startswith("start_report:"):
+            report_id = query.data.split(":", 1)[1]
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT questions, answers, status FROM reports WHERE report_id = %s AND user_id = %s",
@@ -1146,13 +1209,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 )
                 result = cur.fetchone()
                 if not result:
-                    await query.message.reply_text(f"{user_name}, отчет не найден.",
-                                                   reply_markup=default_reply_markup)
+                    await query.message.reply_text(f"{user_name}, отчет не найден.", reply_markup=default_reply_markup)
                     return
                 questions, answers, status = result
                 if status == 'completed':
-                    await query.message.reply_text(f"{user_name}, этот отчет уже заполнен.",
-                                                   reply_markup=default_reply_markup)
+                    await query.message.reply_text(f"{user_name}, этот отчет уже заполнен.", reply_markup=default_reply_markup)
                     return
                 context.user_data['current_report_id'] = report_id
                 context.user_data['current_question_index'] = len(answers) if answers else 0
@@ -1162,10 +1223,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     f"{user_name}, вопрос {context.user_data['current_question_index'] + 1}:\n{question}",
                     reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
                 )
-        except Exception as e:
-            logger.error(f"Ошибка при начале заполнения отчета {report_id} для {user_id}: {str(e)}")
-            await query.message.reply_text(f"{user_name}, ошибка при начале заполнения отчета.",
-                                           reply_markup=default_reply_markup)
+
+        else:
+            await query.message.reply_text(f"{user_name}, неизвестная команда.", reply_markup=default_reply_markup)
+
+    except Exception as e:
+        logger.error(f"Ошибка в handle_callback_query: {str(e)}")
+        await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
 
 # Функция для логирования запросов
 def log_request(user_id: int, request: str, response: str) -> None:
