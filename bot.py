@@ -1110,6 +1110,36 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 except Exception as e:
                     logger.warning(f"Ошибка при показе клавиатуры после файла: {e}")
 
+        # === АДМИН: СКАЧАТЬ ФАЙЛ ИЗ ЛЮБОГО РЕГИОНА ===
+        elif query.data.startswith("admin_download:"):
+            file_idx = int(query.data.split(":", 1)[1])
+            files = context.user_data.get('admin_region_files', [])
+            region = context.user_data.get('selected_region')
+
+            if file_idx >= len(files):
+                await query.message.reply_text(f"{user_name}, файл не найден.")
+                return
+
+            file_name = files[file_idx]['name']
+            file_path = f"/regions/{region}/{file_name}"
+            download_url = get_yandex_disk_file(file_path)
+
+            if not download_url:
+                await query.message.reply_text(f"{user_name}, не удалось получить файл.")
+                return
+
+            file_response = requests.get(download_url)
+            if file_response.status_code == 200:
+                await query.message.reply_document(
+                    document=InputFile(file_response.content, filename=file_name)
+                )
+                # Кнопки после скачивания
+                keyboard = [['Назад в архив']]
+                await query.message.reply_text("\u200B", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+            else:
+                await query.message.reply_text(f"{user_name}, ошибка при скачивании.")
+            return
+
         elif query.data.startswith("download:"):
             file_idx = int(query.data.split(":", 1)[1])
             current_path = f"/regions/{profile['region']}/"
@@ -1668,6 +1698,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
         return
 
+    elif user_input == "Файлы из папок":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, только администраторы могут управлять файлами.", reply_markup=default_reply_markup)
+            return
+
+        keyboard = [
+            ['Документы для РО'],
+            ['Архив документов РО'],
+            ['Назад']
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(f"{user_name}, выберите раздел:", reply_markup=reply_markup)
+        return
+
+
     elif user_input == "Загрузить файл":
         context.user_data["awaiting_upload"] = True
         await update.message.reply_text(
@@ -1685,11 +1730,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Архив документов РО":
-        context.user_data.pop('current_mode', None)
-        context.user_data.pop('current_path', None)
-        context.user_data.pop('file_list', None)
-        context.user_data.pop('awaiting_upload', None)
-        await show_file_list(update, context)
+        if user_id not in ALLOWED_ADMINS:
+            await show_file_list(update, context)
+            return
+
+        keyboard = [
+            ['Скачать файл'],
+            ['Удалить файл'],
+            ['Назад']
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+        return
+
+    elif user_input == "Скачать файл":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, доступ запрещён.", reply_markup=default_reply_markup)
+            return
+        await show_regions_list(update, context, action="download")
+        return
+
+    elif user_input == "Удалить файл":
+        if user_id not in ALLOWED_ADMINS:
+            await update.message.reply_text(f"{user_name}, доступ запрещён.", reply_markup=default_reply_markup)
+            return
+        await show_regions_list(update, context, action="delete")
         return
 
     elif user_input == "Добавить пользователя":
@@ -2046,6 +2111,60 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             return
 
 
+    # === АДМИН: ВЫБОР РЕГИОНА ===
+    if context.user_data.get('awaiting_region_selection'):
+        if user_input == "Назад":
+            context.user_data.pop('awaiting_region_selection', None)
+            context.user_data.pop('selected_region', None)
+            context.user_data.pop('admin_archive_action', None)
+            await update.message.reply_text(f"{user_name}, действие отменено.", reply_markup=default_reply_markup)
+            return
+
+        regions = {profile['region'] for profile in USER_PROFILES.values() if profile.get('region')}
+        if user_input in regions:
+            context.user_data['selected_region'] = user_input
+            context.user_data.pop('awaiting_region_selection', None)
+            await show_region_files(update, context)
+        else:
+            await update.message.reply_text(f"{user_name}, регион не найден. Выберите из списка.")
+        return
+
+    # === АДМИН: УДАЛЕНИЕ ФАЙЛА ===
+    if context.user_data.get('admin_archive_action') == 'delete' and 'admin_region_files' in context.user_data:
+        if user_input == "Назад":
+            context.user_data.pop('admin_archive_action', None)
+            context.user_data.pop('admin_region_files', None)
+            context.user_data.pop('selected_region', None)
+            await update.message.reply_text(f"{user_name}, удаление отменено.", reply_markup=default_reply_markup)
+            return
+
+        files = context.user_data['admin_region_files']
+        file_names = [f['name'] for f in files]
+        if user_input in file_names:
+            file_idx = file_names.index(user_input)
+            file_path = f"/regions/{context.user_data['selected_region']}/{user_input}"
+            if delete_yandex_file(file_path):
+                await update.message.reply_text(f"{user_name}, файл *{user_input}* удалён из региона *{context.user_data['selected_region']}*.", parse_mode='Markdown')
+                # Обновляем список
+                files.pop(file_idx)
+                context.user_data['admin_region_files'] = files
+                if files:
+                    await show_region_files(update, context)
+                else:
+                    await update.message.reply_text(f"{user_name}, папка пуста.", reply_markup=default_reply_markup)
+            else:
+                await update.message.reply_text(f"{user_name}, ошибка при удалении файла.")
+        return
+
+    # === КНОПКА "Назад в архив" ===
+    if user_input == "Назад в архив":
+        context.user_data.pop('admin_region_files', None)
+        context.user_data.pop('current_path', None)
+        await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=ReplyKeyboardMarkup([
+            ['Скачать файл'], ['Удалить файл'], ['Назад']
+        ], resize_keyboard=True))
+        return
+
     else:
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
         log_request(user_id, user_input, response)
@@ -2142,6 +2261,98 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.info(f"Напоминание отправлено пользователю {user_id} для отчета {report_id}")
         except Exception as e:
             logger.error(f"Ошибка при отправке напоминания пользователю {user_id} для отчета {report_id}: {str(e)}")
+
+
+# === НОВЫЕ ФУНКЦИИ ДЛЯ АДМИНА: УПРАВЛЕНИЕ АРХИВОМ РЕГИОНОВ ===
+
+async def show_regions_list(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
+    """Показывает список регионов для скачивания/удаления файлов"""
+    user_id = update.effective_user.id
+    user_name = get_user_name(user_id)
+
+    # Получаем все уникальные регионы из профилей
+    regions = sorted({profile['region'] for profile in USER_PROFILES.values() if profile.get('region')})
+    if not regions:
+        await update.message.reply_text(f"{user_name}, нет зарегистрированных регионов.")
+        return
+
+    keyboard = [[region] for region in regions]
+    keyboard.append(['Назад'])
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    context.user_data['admin_archive_action'] = action  # 'download' или 'delete'
+    context.user_data['awaiting_region_selection'] = True
+
+    action_text = "скачать" if action == "download" else "удалить"
+    await update.message.reply_text(
+        f"{user_name}, выберите регион, из которого хотите {action_text} файл:",
+        reply_markup=reply_markup
+    )
+
+
+async def show_region_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Показывает файлы в выбранном регионе"""
+    user_id = update.effective_user.id
+    user_name = get_user_name(user_id)
+    region = context.user_data.get('selected_region')
+    action = context.user_data.get('admin_archive_action')
+
+    if not region:
+        await update.message.reply_text(f"{user_name}, регион не выбран.")
+        return
+
+    folder_path = f"/regions/{region}/"
+    create_yandex_folder(folder_path)
+    files = list_yandex_disk_files(folder_path)
+
+    if not files:
+        await update.message.reply_text(f"{user_name}, в папке региона *{region}* нет файлов.", parse_mode='Markdown')
+        context.user_data.pop('awaiting_region_selection', None)
+        context.user_data.pop('selected_region', None)
+        context.user_data.pop('admin_archive_action', None)
+        return
+
+    context.user_data['admin_region_files'] = files
+    context.user_data['current_path'] = folder_path
+
+    if action == "download":
+        file_keyboard = [
+            [InlineKeyboardButton(item['name'], callback_data=f"admin_download:{idx}")]
+            for idx, item in enumerate(files)
+        ]
+        reply_markup = InlineKeyboardMarkup(file_keyboard)
+        await update.message.reply_text(
+            f"*{region}* — выберите файл для скачивания:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    else:  # delete
+        keyboard = [[item['name']] for item in files]
+        keyboard.append(['Назад'])
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            f"*{region}* — выберите файл для удаления:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+
+async def delete_yandex_file(file_path: str) -> bool:
+    """Удаляет файл с Яндекс.Диска"""
+    encoded_path = quote(file_path, safe='/')
+    url = f'https://cloud-api.yandex.net/v1/disk/resources?path={encoded_path}'
+    headers = {'Authorization': f'OAuth {YANDEX_TOKEN}'}
+    try:
+        response = requests.delete(url, headers=headers)
+        if response.status_code == 204:
+            logger.info(f"Файл удалён: {file_path}")
+            return True
+        else:
+            logger.error(f"Ошибка удаления файла {file_path}: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Исключение при удалении {file_path}: {str(e)}")
+        return False
 
 # Основная функция запуска бота
 def main() -> None:
