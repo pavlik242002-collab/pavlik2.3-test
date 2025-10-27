@@ -6,3 +6,4 @@ pandas
 duckduckgo_search
 python-dotenv
 psycopg2
+openpyxl
