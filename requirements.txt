@@ -5,3 +5,4 @@ openai
 pandas
 duckduckgo_search
 python-dotenv
+psycopg2
