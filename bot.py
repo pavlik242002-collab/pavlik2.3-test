@@ -1103,7 +1103,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 keyboard.append(['В главное меню'])
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                await query.message.reply_text(" ", reply_markup=reply_markup)
+                # === ТОЛЬКО КЛАВИАТУРА БЕЗ ТЕКСТА ===
+                await query.message.reply_text(
+                    "",  # Невидимый символ
+                    reply_markup=reply_markup
+                )
 
         elif query.data.startswith("download:"):
             file_idx = int(query.data.split(":", 1)[1])
@@ -1143,7 +1147,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 keyboard = [['Назад'], ['В главное меню']]  # В архиве нет вложенных папок
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                await query.message.reply_text(" ", reply_markup=reply_markup)
+                # === ТОЛЬКО КЛАВИАТУРА БЕЗ ТЕКСТА ===
+                await query.message.reply_text(
+                    "",  # Невидимый символ (zero-width space)
+                    reply_markup=reply_markup
+                )
 
         elif query.data.startswith("start_report:"):
             report_id = query.data.split(":", 1)[1]
