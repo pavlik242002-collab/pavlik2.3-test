@@ -992,7 +992,9 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_name = get_user_name(user_id)
 
     current_path = context.user_data.get('current_path', '/documents/')
-    folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
+    folder_name = current_path.rstrip('/').split('/')[-1]
+    if current_path == '/documents/':
+        folder_name = "Документы для РО"
 
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
@@ -1091,16 +1093,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     document=InputFile(file_response.content, filename=file_name)
                 )
 
-                # === СОХРАНЯЕМ ПУТЬ И ПОКАЗЫВАЕМ ПАПКИ ===
-                context.user_data['current_path'] = current_path
-                dirs = list_yandex_disk_directories(current_path)
-                keyboard = [[dir_name] for dir_name in dirs]
-                if current_path != '/documents/':
-                    keyboard.append(['Назад'])
-                keyboard.append(['В главное меню'])
-                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-
-                await query.message.reply_text(reply_markup=reply_markup)
+                # Файл отправлен — больше ничего не делаем
+                pass
 
             else:
                 await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
@@ -1140,11 +1134,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
-            else:
-                await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
-        except Exception as e:
-            logger.error(f"Ошибка при скачивании из региона: {str(e)}")
-            await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
+                pass
 
     elif query.data.startswith("start_report:"):
         report_id = query.data.split(":", 1)[1]
