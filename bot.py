@@ -993,27 +993,23 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
 
-    # Сброс списка файлов при входе в новую папку
+    # Сбрасываем старый список
     context.user_data.pop('file_list', None)
 
     current_path = context.user_data.get('current_path', '/documents/')
     folder_name = current_path.rstrip('/').split('/')[-1] or "Документы"
 
-    # НЕ создаём папку автоматически — только если она уже есть
-    # create_yandex_folder(current_path)  # УДАЛИ ЭТУ СТРОКУ!
-
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
 
-    logger.info(f"Пользователь {user_id} в папке {current_path}, файлов: {len(files)}, папок: {len(dirs)}")
-
-    # Клавиатура с папками
+    # === Клавиатура с папками ===
     keyboard = [[dir_name] for dir_name in dirs]
     if current_path != '/documents/':
         keyboard.append(['Назад'])
     keyboard.append(['В главное меню'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+    # === Если есть файлы — только они ===
     if files:
         context.user_data['file_list'] = files
         context.user_data['current_path'] = current_path
@@ -1023,20 +1019,14 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         ]
         file_reply_markup = InlineKeyboardMarkup(file_keyboard)
         await update.message.reply_text(
-            f"{user_name}, файлы в папке *{folder_name}*:",
+            f"*{folder_name}*:",
             reply_markup=file_reply_markup,
             parse_mode='Markdown'
         )
-    elif dirs:
-        message = "Документы для РО" if current_path == '/documents/' else f"Папки в *{folder_name}*:"
-        await update.message.reply_text(
-            f"{user_name}, {message}",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
     else:
+        # Если папка пуста — только папки
         await update.message.reply_text(
-            f"{user_name}, папка *{folder_name}* пуста.",
+            f"*{folder_name}*:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
@@ -1107,30 +1097,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     parse_mode='Markdown'
                 )
 
-                # === ВОЗВРАЩАЕМ КЛАВИАТУРУ: ФАЙЛЫ + ПАПКИ ===
-                dirs = list_yandex_disk_directories(current_path)
-                keyboard = [[dir_name] for dir_name in dirs]
-                if current_path != '/documents/':
-                    keyboard.append(['Назад'])
-                keyboard.append(['В главное меню'])
-                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                # Показываем файлы снова
-                file_keyboard = [
-                    [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
-                    for idx, item in enumerate(files)
-                ]
-                file_reply_markup = InlineKeyboardMarkup(file_keyboard)
-
-                await query.message.reply_text(
-                    f"{user_name}, файлы в папке *{current_path.rstrip('/').split('/')[-1]}*:",
-                    reply_markup=file_reply_markup,
-                    parse_mode='Markdown'
-                )
-                await query.message.reply_text(
-                    "Выберите папку или действие:",
-                    reply_markup=reply_markup
-                )
             else:
                 await query.message.reply_text(f"{user_name}, ошибка загрузки файла.", reply_markup=default_reply_markup)
         except Exception as e:
