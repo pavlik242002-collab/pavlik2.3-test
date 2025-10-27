@@ -2438,6 +2438,8 @@ async def handle_admin_panel_message(update: Update, context: ContextTypes.DEFAU
 
     return False
 
+# === ВСЁ, ЧТО ВЫШЕ — ТВОЙ СТАРЫЙ КОД + АДМИН-ПАНЕЛЬ ===
+
 # Основная функция запуска бота
 def main() -> None:
     try:
@@ -2448,22 +2450,20 @@ def main() -> None:
 
         # === СТАРЫЕ ХЕНДЛЕРЫ ===
         application.add_handler(CommandHandler("start", send_welcome))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
         application.add_handler(CallbackQueryHandler(handle_callback_query))
 
-        # === ПЕРЕХВАТ СООБЩЕНИЙ В АДМИН-ПАНЕЛИ ===
-        async def message_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if await handle_admin_panel_message(update, context):
-                return
-            await handle_message(update, context)
+        # === ПЕРЕХВАТ СООБЩЕНИЙ В АДМИН-ПАНЕЛИ ДО НЕЙРОНКИ ===
+        async def admin_panel_filter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if context.user_data.get('in_admin_panel'):
+                return await handle_admin_panel_message(update, context)
+            return False
 
-        # Заменяем старый MessageHandler для текста
-        # Находим индекс старого текстового хендлера
-        for i, handler in enumerate(application.handlers):
-            if isinstance(handler, MessageHandler) and handler.filters == (filters.TEXT & ~filters.COMMAND):
-                application.handlers[i] = MessageHandler(filters.TEXT & ~filters.COMMAND, message_wrapper)
-                break
+        # Добавляем фильтр ПЕРЕД основным handle_message
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_panel_filter), group=0)
+
+        # Основной обработчик сообщений (после админки)
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
         application.job_queue.run_repeating(check_reminders, interval=21600, first=60)
         logger.info("Бот запущен с АДМИН-ПАНЕЛЬЮ и РЕЙТИНГОМ...")
@@ -2472,5 +2472,6 @@ def main() -> None:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
 
+# ЭТОТ БЛОК ДОЛЖЕН БЫТЬ В САМОМ КОНЦЕ ФАЙЛА!
 if __name__ == '__main__':
     main()
