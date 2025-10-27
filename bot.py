@@ -1091,9 +1091,19 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                                                    reply_markup=default_reply_markup)
                     return
 
+                # === ОТПРАВЛЯЕМ ФАЙЛ ===
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
+
+                # === ТОЛЬКО 2 КНОПКИ ПОСЛЕ СКАЧИВАНИЯ ===
+                keyboard = []
+                if context.user_data.get('current_path', '/documents/') != '/documents/':
+                    keyboard.append(['Назад'])
+                keyboard.append(['В главное меню'])
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+                await query.message.reply_text(" ", reply_markup=reply_markup)
 
         elif query.data.startswith("download:"):
             file_idx = int(query.data.split(":", 1)[1])
@@ -1124,9 +1134,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                                                    reply_markup=default_reply_markup)
                     return
 
+                # === ОТПРАВЛЯЕМ ФАЙЛ ===
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
+
+                # === ТОЛЬКО 2 КНОПКИ ПОСЛЕ СКАЧИВАНИЯ ===
+                keyboard = [['Назад'], ['В главное меню']]  # В архиве нет вложенных папок
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+                await query.message.reply_text(" ", reply_markup=reply_markup)
 
         elif query.data.startswith("start_report:"):
             report_id = query.data.split(":", 1)[1]
