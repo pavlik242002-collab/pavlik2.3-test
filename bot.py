@@ -206,6 +206,11 @@ def init_db(conn):
                         WHERE report_title IS NULL;
                     """)
 
+                cur.execute("""
+                    ALTER TABLE reports 
+                    ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;
+                """)
+
                 conn.commit()
                 logger.info(
                     "Таблица reports обновлена: добавлены report_title, reminder_interval_minutes, is_reminder_active")
@@ -1221,6 +1226,8 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+
+
     await query.answer()
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
@@ -1440,10 +1447,35 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                     f"{user_name}, вопрос {context.user_data['current_question_index'] + 1}:\n{question}",
                     reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
                 )
+        # === ОБРАБОТКА КНОПОК: Остановить (s), Просмотр (v), Выгрузить (e) ===
+        elif query.data.startswith("s"):
+            try:
+                pk = int(query.data[1:])
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE reports SET is_reminder_active = FALSE WHERE id = %s", (pk,))
+                    if cur.rowcount > 0:
+                        conn.commit()
+                        await query.message.edit_text(f"{user_name}, напоминания остановлены.")
+                        await query.message.reply_text("Вернуться в меню?", reply_markup=ReplyKeyboardMarkup([['Отчеты', 'Назад']], resize_keyboard=True))
+                    else:
+                        await query.message.edit_text(f"{user_name}, отчет не найден.")
+            except Exception as e:
+                await query.message.edit_text(f"Ошибка: {str(e)}")
+
+        elif query.data.startswith("v"):
+            pk = int(query.data[1:])
+            await view_report_by_pk(query, pk, user_name)
+
+        elif query.data.startswith("e"):
+            pk = int(query.data[1:])
+            await export_report_by_pk(query, pk, user_name)
+
 
     except Exception as e:
         logger.error(f"Ошибка в handle_callback_query: {str(e)}")
         await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
+
+await query.answer()
 
 # Функция для логирования запросов
 def log_request(user_id: int, request: str, response: str) -> None:
@@ -2650,16 +2682,15 @@ async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT report_id, report_title, week_number, year 
-                FROM reports 
+                SELECT id, report_title, week_number, year
+                FROM reports
                 WHERE status != 'completed' AND is_reminder_active = TRUE
                 ORDER BY created_at DESC LIMIT 20
             """)
             active = cur.fetchall()
-            logger.info(f"Найдено {len(active)} активных отчетов с напоминаниями для админа {user_id}")
     except Exception as e:
-        logger.error(f"Ошибка при получении активных отчетов: {str(e)}")
-        await update.message.reply_text(f"{user_name}, ошибка базы данных: {str(e)}.")
+        logger.error(f"Ошибка: {str(e)}")
+        await update.message.reply_text(f"{user_name}, ошибка: {str(e)}.")
         return
 
     if not active:
@@ -2667,32 +2698,16 @@ async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     keyboard = []
-    for report_id, title, week, year in active:
-        # Формируем текст кнопки
-        button_text = f"{title} (нед {week} {year})"[:50]  # Ограничиваем длину текста кнопки
-        callback = f"stop_report:{report_id}"
-        # Проверяем длину callback_data
-        if len(callback.encode('utf-8')) > 64:
-            logger.error(f"callback_data слишком длинное для report_id={report_id}: {callback}")
-            continue  # Пропускаем кнопку, если callback_data слишком длинное
-        logger.info(f"Создаю кнопку: text='{button_text}', callback='{callback}'")
+    for pk, title, week, year in active:
+        short_title = title[:30] + "..." if len(title) > 30 else title
+        button_text = f"{short_title} (н{week} {year})"
+        callback = f"s{pk}"  # ← s1, s2, s3
         keyboard.append([InlineKeyboardButton(button_text, callback_data=callback)])
 
-    if not keyboard:
-        await update.message.reply_text(f"{user_name}, не удалось создать кнопки для остановки напоминаний.")
-        return
-
-    try:
-        await update.message.reply_text(
-            f"{user_name}, выберите отчет для остановки напоминаний:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при отправке сообщения с кнопками: {str(e)}")
-        await update.message.reply_text(
-            f"{user_name}, ошибка при отображении списка отчетов: {str(e)}."
-        )
-
+    await update.message.reply_text(
+        f"{user_name}, выберите отчет для остановки:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
     user_id = update.effective_user.id
@@ -2700,41 +2715,33 @@ async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TY
 
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT DISTINCT report_title FROM reports WHERE report_title IS NOT NULL AND report_title != ''")
-            titles = [row[0] for row in cur.fetchall()]
-            logger.info(f"Найдено {len(titles)} названий отчетов для пользователя {user_id}")
+            cur.execute("""
+                SELECT DISTINCT id, report_title 
+                FROM reports 
+                WHERE report_title IS NOT NULL AND report_title != ''
+                ORDER BY created_at DESC
+            """)
+            reports = cur.fetchall()
     except Exception as e:
-        logger.error(f"Ошибка при получении названий отчетов: {str(e)}")
-        await update.message.reply_text(f"{user_name}, ошибка при получении названий отчетов: {str(e)}.")
+        await update.message.reply_text(f"{user_name}, ошибка: {str(e)}.")
         return
 
-    if not titles:
-        logger.info(f"Нет отчетов с названиями для пользователя {user_id}")
-        await update.message.reply_text(f"{user_name}, нет отчетов с названиями.")
+    if not reports:
+        await update.message.reply_text(f"{user_name}, нет отчетов.")
         return
 
     keyboard = []
-    for title in titles:
-        # Укорачиваем title, чтобы callback_data не превышал 64 байта
-        safe_title = title[:20].replace(':', '').replace('\n', ' ')  # Удаляем проблемные символы
-        callback = f"{action}_by_title:{safe_title}"
-        if len(callback.encode('utf-8')) > 64:
-            logger.warning(f"callback_data слишком длинное, обрезаю: {callback}")
-            safe_title = safe_title[:10]  # Еще сильнее укорачиваем
-            callback = f"{action}_by_title:{safe_title}"
-        logger.info(f"Создаю кнопку: {title} -> callback: {callback}")
-        keyboard.append([InlineKeyboardButton(title, callback_data=callback)])
+    for pk, title in reports:
+        short_title = title[:35] + "..." if len(title) > 35 else title
+        prefix = "v" if action == "view" else "e"
+        callback = f"{prefix}{pk}"  # ← v1, e2
+        keyboard.append([InlineKeyboardButton(short_title, callback_data=callback)])
 
-    try:
-        await update.message.reply_text(
-            f"{user_name}, выберите отчет для {'просмотра' if action == 'view' else 'выгрузки'}:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при отправке сообщения с кнопками: {str(e)}")
-        await update.message.reply_text(f"{user_name}, ошибка при отображении кнопок: {str(e)}.")
+    text = "просмотра" if action == "view" else "выгрузки"
+    await update.message.reply_text(
+        f"{user_name}, выберите отчет для {text}:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 def export_reports_by_title(reports, title):
     data = []
@@ -2773,6 +2780,47 @@ def main() -> None:
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
         raise
+
+# === НОВАЯ ФУНКЦИЯ 1: ПРОСМОТР ОТЧЕТА ===
+async def view_report_by_pk(query, pk, user_name):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT report_title, user_id, status, questions, answers
+                FROM reports WHERE id = %s
+            """, (pk,))
+            row = cur.fetchone()
+            if not row:
+                await query.message.reply_text("Отчет не найден.")
+                return
+            title, user_id, status, questions, answers = row
+            text = f"*{title}*\nСтатус: {status}\n\n"
+            for i, (q, a) in enumerate(zip(questions, answers or []), 1):
+                text += f"{i}. {q}\nОтвет: {a or '—'}\n"
+            await send_long_text(query, text, parse_mode='Markdown')
+    except Exception as e:
+        await query.message.reply_text(f"Ошибка: {str(e)}")
+
+# === НОВАЯ ФУНКЦИЯ 2: ВЫГРУЗКА В EXCEL ===
+async def export_report_by_pk(query, pk, user_name):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT report_title, user_id, questions, answers, status, created_at
+                FROM reports WHERE id = %s
+            """, (pk,))
+            row = cur.fetchone()
+            if not row:
+                await query.message.reply_text("Отчет не найден.")
+                return
+            output = export_reports_by_title([row], row[0])
+            safe_name = row[0][:20].replace(' ', '_') + '.xlsx'
+            await query.message.reply_document(
+                InputFile(output, safe_name),
+                caption=f"{user_name}, отчет выгружен."
+            )
+    except Exception as e:
+        await query.message.reply_text(f"Ошибка: {str(e)}")
 
 if __name__ == '__main__':
     main()
