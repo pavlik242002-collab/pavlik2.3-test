@@ -2819,10 +2819,27 @@ async def view_report_by_pk(query, pk, user_name):
                 await query.message.reply_text("Отчет не найден.")
                 return
             title, user_id, status, questions, answers = row
-            text = f"*{title}*\nСтатус: {status}\n\n"
+
+            user_profile = USER_PROFILES.get(user_id, {})
+            report_user_name = user_profile.get('name', f"ID {user_id}")
+            region = user_profile.get('region', '—')
+
+            text = f"*{title}*\n"
+            text += f"Пользователь: {report_user_name} | Регион: {region}\n"
+            text += f"Статус: {status}\n\n"
+
             for i, (q, a) in enumerate(zip(questions, answers or []), 1):
-                text += f"{i}. {q}\nОтвет: {a or '—'}\n"
-            await send_long_text(query, text, parse_mode='Markdown')
+                text += f"{i}. {q}\n"
+                text += f"Ответ: {a or '—'}\n\n"
+
+            # Отправляем частями, с parse_mode
+            max_length = 4000
+            for i in range(0, len(text), max_length):
+                part = text[i:i + max_length]
+                if i + max_length >= len(text):
+                    await query.message.reply_text(part, parse_mode='Markdown')
+                else:
+                    await query.message.reply_text(part, parse_mode='Markdown')
     except Exception as e:
         await query.message.reply_text(f"Ошибка: {str(e)}")
 
