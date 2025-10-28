@@ -2732,10 +2732,10 @@ async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT DISTINCT id, report_title 
-                FROM reports 
-                WHERE report_title IS NOT NULL AND report_title != ''
-                ORDER BY created_at DESC
+                SELECT r.id, r.report_title, r.created_at, r.user_id
+                FROM reports r
+                WHERE r.report_title IS NOT NULL AND r.report_title != ''
+                ORDER BY r.created_at DESC
             """)
             reports = cur.fetchall()
     except Exception as e:
@@ -2747,11 +2747,20 @@ async def list_reports_by_title(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     keyboard = []
-    for pk, title in reports:
-        short_title = title[:35] + "..." if len(title) > 35 else title
+    for pk, title, created_at, report_user_id in reports:
+        # Получаем имя и регион пользователя, который создал отчёт
+        user_profile = USER_PROFILES.get(report_user_id, {})
+        report_user_name = user_profile.get('name', f"ID {report_user_id}")
+        region = user_profile.get('region', '—')
+
+        # Формируем подпись кнопки
+        date_str = created_at.strftime("%d.%m.%Y %H:%M") if created_at else ""
+        short_title = title[:25] + "..." if len(title) > 25 else title
+        button_text = f"{short_title} | {report_user_name} | {region} ({date_str})"
+
         prefix = "v" if action == "view" else "e"
-        callback = f"{prefix}{pk}"  # ← v1, e2
-        keyboard.append([InlineKeyboardButton(short_title, callback_data=callback)])
+        callback = f"{prefix}{pk}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback)])
 
     text = "просмотра" if action == "view" else "выгрузки"
     await update.message.reply_text(
