@@ -1226,6 +1226,7 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if current_path == '/documents/':
         folder_name = "Документы для РО"
 
+    # === ВСЕГДА ЗАГРУЖАЕМ ФАЙЛЫ ЗАНОВО ===
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
 
@@ -1236,7 +1237,7 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     keyboard.append(['В главное меню'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    # === ВСЕГДА СОХРАНЯЕМ ПУТЬ И ФАЙЛЫ ===
+    # === СОХРАНЯЕМ ПУТЬ И ФАЙЛЫ ===
     context.user_data['current_path'] = current_path
     context.user_data['file_list'] = files
 
@@ -2013,7 +2014,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         await show_reports_menu(update, context)
-        return
 
     elif user_input == "Рассылки":
         if not is_admin_or_delta(user_id):
@@ -2021,7 +2021,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                             reply_markup=default_reply_markup)
             return
         await show_broadcast_menu(update, context)
-        return
 
     elif user_input == "Рассылка пользователям":
         if not is_admin_or_delta(user_id):
