@@ -1226,26 +1226,31 @@ async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    await query.answer()                                   # <-- подтверждение callback-запроса
 
-
-    await query.answer()
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
     default_reply_markup = context.user_data.get('default_reply_markup', ReplyKeyboardRemove())
     profile = USER_PROFILES.get(user_id)
 
     if not profile or "region" not in profile:
-        await query.message.reply_text(f"{user_name}, ошибка: регион не определён.", reply_markup=default_reply_markup)
+        await query.message.reply_text(
+            f"{user_name}, ошибка: регион не определён.",
+            reply_markup=default_reply_markup
+        )
         return
 
     try:
+        # ------------------- Скачивание файла из /documents/ -------------------
         if query.data.startswith("doc_download:"):
             file_idx = int(query.data.split(":", 1)[1])
             current_path = context.user_data.get('current_path', '/documents/')
             files = context.user_data.get('file_list', []) or list_yandex_disk_files(current_path)
 
             if file_idx >= len(files):
-                await query.message.reply_text(f"{user_name}, файл не найден.", reply_markup=default_reply_markup)
+                await query.message.reply_text(
+                    f"{user_name}, файл не найден.", reply_markup=default_reply_markup
+                )
                 return
 
             file_name = files[file_idx]['name']
@@ -1253,38 +1258,42 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             download_url = get_yandex_disk_file(file_path)
 
             if not download_url:
-                await query.message.reply_text(f"{user_name}, не удалось получить файл.",
-                                               reply_markup=default_reply_markup)
+                await query.message.reply_text(
+                    f"{user_name}, не удалось получить файл.", reply_markup=default_reply_markup
+                )
                 return
 
             file_response = requests.get(download_url)
             if file_response.status_code == 200:
-                file_size = len(file_response.content) / (1024 * 1024)
-                if file_size > 20:
-                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).",
-                                                   reply_markup=default_reply_markup)
+                file_size_mb = len(file_response.content) / (1024 * 1024)
+                if file_size_mb > 20:
+                    await query.message.reply_text(
+                        f"{user_name}, файл слишком большой (>20 МБ).",
+                        reply_markup=default_reply_markup
+                    )
                     return
-
-                # === ОТПРАВЛЯЕМ ФАЙЛ ===
 
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
 
-                # === ТОЛЬКО 2 КНОПКИ: БЕЗ ТЕКСТА ===
                 keyboard = []
                 if context.user_data.get('current_path', '/documents/') != '/documents/':
                     keyboard.append(['Назад'])
                 keyboard.append(['В главное меню'])
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                # === ОТПРАВЛЯЕМ ПУСТОЕ СООБЩЕНИЕ С КНОПКАМИ ===
                 try:
                     await query.message.reply_text("\u200B", reply_markup=reply_markup)
                 except Exception as e:
                     logger.warning(f"Ошибка при показе клавиатуры после файла: {e}")
+            else:
+                await query.message.reply_text(
+                    f"{user_name}, ошибка при скачивании.", reply_markup=default_reply_markup
+                )
+            return
 
-        # === АДМИН: СКАЧАТЬ ФАЙЛ ИЗ ЛЮБОГО РЕГИОНА ===
+        # ------------------- Админ: скачивание из любого региона -------------------
         elif query.data.startswith("admin_download:"):
             file_idx = int(query.data.split(":", 1)[1])
             files = context.user_data.get('admin_region_files', [])
@@ -1307,13 +1316,16 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
-                # Кнопки после скачивания
                 keyboard = [['Назад в архив']]
-                await query.message.reply_text("\u200B", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+                await query.message.reply_text(
+                    "\u200B",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                )
             else:
                 await query.message.reply_text(f"{user_name}, ошибка при скачивании.")
             return
 
+        # ------------------- Скачивание из личного архива пользователя -------------------
         elif query.data.startswith("download:"):
             file_idx = int(query.data.split(":", 1)[1])
             current_path = f"/regions/{profile['region']}/"
@@ -1322,8 +1334,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             context.user_data['current_path'] = current_path
 
             if file_idx >= len(files):
-                await query.message.reply_text(f"{user_name}, ошибка: файл не найден.",
-                                               reply_markup=default_reply_markup)
+                await query.message.reply_text(
+                    f"{user_name}, ошибка: файл не найден.", reply_markup=default_reply_markup
+                )
                 return
 
             file_name = files[file_idx]['name']
@@ -1331,151 +1344,154 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             download_url = get_yandex_disk_file(file_path)
 
             if not download_url:
-                await query.message.reply_text(f"{user_name}, ошибка: не удалось получить файл.",
-                                               reply_markup=default_reply_markup)
+                await query.message.reply_text(
+                    f"{user_name}, ошибка: не удалось получить файл.", reply_markup=default_reply_markup
+                )
                 return
 
             file_response = requests.get(download_url)
             if file_response.status_code == 200:
-                file_size = len(file_response.content) / (1024 * 1024)
-                if file_size > 20:
-                    await query.message.reply_text(f"{user_name}, файл слишком большой (>20 МБ).",
-                                                   reply_markup=default_reply_markup)
+                file_size_mb = len(file_response.content) / (1024 * 1024)
+                if file_size_mb > 20:
+                    await query.message.reply_text(
+                        f"{user_name}, файл слишком большой (>20 МБ).", reply_markup=default_reply_markup
+                    )
                     return
 
-                # === ОТПРАВЛЯЕМ ФАЙЛ ===
                 await query.message.reply_document(
                     document=InputFile(file_response.content, filename=file_name)
                 )
 
-                # === ТОЛЬКО 2 КНОПКИ: БЕЗ ТЕКСТА ===
                 keyboard = [['Назад'], ['В главное меню']]
                 reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-                # === ОТПРАВЛЯЕМ ПУСТОЕ СООБЩЕНИЕ С КНОПКАМИ ===
                 try:
                     await query.message.reply_text("\u200B", reply_markup=reply_markup)
                 except Exception as e:
                     logger.warning(f"Ошибка при показе клавиатуры после файла: {e}")
+            else:
+                await query.message.reply_text(
+                    f"{user_name}, ошибка при скачивании.", reply_markup=default_reply_markup
+                )
+            return
 
+        # ------------------- Запуск отчёта -------------------
         elif query.data.startswith("start_report:"):
             report_id = query.data.split(":", 1)[1]
+
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT questions, answers, status FROM reports WHERE report_id = %s AND user_id = %s",
+                    """
+                    SELECT questions, answers, status
+                    FROM reports
+                    WHERE report_id = %s AND user_id = %s
+                    """,
                     (report_id, user_id)
                 )
                 result = cur.fetchone()
-                if not result:
-                    await query.message.reply_text(f"{user_name}, отчет не найден.", reply_markup=default_reply_markup)
-                    return
 
-                elif query.data.startswith("stop_report:"):
-                    report_id = query.data.split(":", 1)[1]
-                    user_name = get_user_name(update.effective_user.id)
-                    logger.info(
-                        f"Попытка остановки напоминаний для отчета {report_id} пользователем {update.effective_user.id}")
-                    try:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE reports SET is_reminder_active = FALSE WHERE report_id = %s",
-                                        (report_id,))
-                            if cur.rowcount == 0:
-                                logger.warning(f"Отчет {report_id} не найден или уже неактивен")
-                                await query.message.reply_text(
-                                    f"{user_name}, отчет не найден или напоминания уже остановлены.")
-                                return
-                            conn.commit()
-                        await query.message.reply_text(f"{user_name}, напоминания остановлены для отчета {report_id}.")
-                        logger.info(f"Напоминания успешно остановлены для отчета {report_id}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при остановке напоминаний для отчета {report_id}: {str(e)}")
-                        await query.message.reply_text(f"{user_name}, ошибка при остановке напоминаний: {str(e)}.")
-                    return
-
-                elif query.data.startswith("view_by_title:") or query.data.startswith("export_by_title:"):
-                    action = "view" if "view" in query.data else "export"
-                    safe_title = query.data.split(":", 1)[1]
-                    user_name = get_user_name(update.effective_user.id)
-                    logger.info(f"Обработка callback: action={action}, safe_title={safe_title}")
-
-                    try:
-                        with conn.cursor() as cur:
-                            # Ищем отчеты, где report_title начинается с safe_title
-                            cur.execute("""
-                                SELECT report_id, user_id, questions, answers, status, created_at, report_title
-                                FROM reports 
-                                WHERE report_title LIKE %s 
-                                ORDER BY created_at
-                            """, (safe_title + '%',))
-                            reports = cur.fetchall()
-                            logger.info(f"Найдено {len(reports)} отчетов для safe_title={safe_title}")
-                    except Exception as e:
-                        logger.error(f"Ошибка при получении отчетов: {str(e)}")
-                        await query.message.reply_text(f"{user_name}, ошибка при получении отчетов: {str(e)}.")
-                        return
-
-                    if not reports:
-                        logger.info(f"Отчеты не найдены для safe_title={safe_title}")
-                        await query.message.reply_text(f"{user_name}, отчеты с названием '{safe_title}' не найдены.")
-                        return
-
-                    if action == "view":
-                        text = f"*{reports[0][6]}*\n\n"  # Используем полное название из первого отчета
-                        for r in reports:
-                            user_name_report = get_user_name(r[1])
-                            text += f"• {user_name_report} — {r[4]}\n"
-                        await send_long_text(query, text, parse_mode='Markdown')
-                    else:
-                        output = export_reports_by_title(reports, reports[0][6])  # Полное название
-                        safe_file_name = reports[0][6][:20].replace(' ', '_').replace(':', '') + '.xlsx'
-                        await query.message.reply_document(
-                            InputFile(output, safe_file_name),
-                            caption=f"{user_name}, отчет: {reports[0][6]}"
-                        )
-                    return
-
-                questions, answers, status = result
-                if status == 'completed':
-                    await query.message.reply_text(f"{user_name}, этот отчет уже заполнен.",
-                                                   reply_markup=default_reply_markup)
-                    return
-                context.user_data['current_report_id'] = report_id
-                context.user_data['current_question_index'] = len(answers) if answers else 0
-                context.user_data['current_answers'] = answers if answers else []
-                question = questions[context.user_data['current_question_index']]
+            if not result:
                 await query.message.reply_text(
-                    f"{user_name}, вопрос {context.user_data['current_question_index'] + 1}:\n{question}",
-                    reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
+                    f"{user_name}, отчет не найден.", reply_markup=default_reply_markup
                 )
-        # === ОБРАБОТКА КНОПОК: Остановить (s), Просмотр (v), Выгрузить (e) ===
-        elif query.data.startswith("s"):
-            try:
-                pk = int(query.data[1:])
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE reports SET is_reminder_active = FALSE WHERE id = %s", (pk,))
-                    if cur.rowcount > 0:
-                        conn.commit()
-                        await query.message.edit_text(f"{user_name}, напоминания остановлены.")
-                        await query.message.reply_text("Вернуться в меню?", reply_markup=ReplyKeyboardMarkup([['Отчеты', 'Назад']], resize_keyboard=True))
-                    else:
-                        await query.message.edit_text(f"{user_name}, отчет не найден.")
-            except Exception as e:
-                await query.message.edit_text(f"Ошибка: {str(e)}")
+                return
 
+            questions, answers, status = result
+
+            if status == 'completed':
+                await query.message.reply_text(
+                    f"{user_name}, этот отчет уже заполнен.", reply_markup=default_reply_markup
+                )
+                return
+
+            context.user_data['current_report_id'] = report_id
+            context.user_data['current_question_index'] = len(answers) if answers else 0
+            context.user_data['current_answers'] = answers if answers else []
+
+            question = questions[context.user_data['current_question_index']]
+            await query.message.reply_text(
+                f"{user_name}, вопрос {context.user_data['current_question_index'] + 1}:\n{question}",
+                reply_markup=ReplyKeyboardMarkup([['Отмена']], resize_keyboard=True)
+            )
+            return
+
+        # ------------------- Остановка напоминаний (s) -------------------
+        elif query.data.startswith("s"):
+            pk = int(query.data[1:])
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE reports SET is_reminder_active = FALSE WHERE id = %s",
+                    (pk,)
+                )
+                if cur.rowcount > 0:
+                    conn.commit()
+                    await query.message.edit_text(f"{user_name}, напоминания остановлены.")
+                    await query.message.reply_text(
+                        "Вернуться в меню?",
+                        reply_markup=ReplyKeyboardMarkup([['Отчеты', 'Назад']], resize_keyboard=True)
+                    )
+                else:
+                    await query.message.edit_text(f"{user_name}, отчет не найден.")
+            return
+
+        # ------------------- Просмотр отчёта (v) -------------------
         elif query.data.startswith("v"):
             pk = int(query.data[1:])
             await view_report_by_pk(query, pk, user_name)
+            return
 
+        # ------------------- Выгрузка отчёта в Excel (e) -------------------
         elif query.data.startswith("e"):
             pk = int(query.data[1:])
             await export_report_by_pk(query, pk, user_name)
+            return
 
+        # ------------------- Просмотр/выгрузка по названию отчёта -------------------
+        elif query.data.startswith("view_by_title:") or query.data.startswith("export_by_title:"):
+            action = "view" if query.data.startswith("view_by_title:") else "export"
+            safe_title = query.data.split(":", 1)[1]
+
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT report_id, user_id, questions, answers, status, created_at, report_title
+                        FROM reports
+                        WHERE report_title LIKE %s
+                        ORDER BY created_at
+                        """,
+                        (safe_title + '%',)
+                    )
+                    reports = cur.fetchall()
+            except Exception as e:
+                logger.error(f"Ошибка при получении отчетов: {str(e)}")
+                await query.message.reply_text(f"{user_name}, ошибка при получении отчетов: {str(e)}.")
+                return
+
+            if not reports:
+                await query.message.reply_text(f"{user_name}, отчеты с названием '{safe_title}' не найдены.")
+                return
+
+            if action == "view":
+                text = f"*{reports[0][6]}*\n\n"
+                for r in reports:
+                    user_name_report = get_user_name(r[1])
+                    text += f"• {user_name_report} — {r[4]}\n"
+                await send_long_text(query, text, parse_mode='Markdown')
+            else:  # export
+                output = export_reports_by_title(reports, reports[0][6])
+                safe_file_name = reports[0][6][:20].replace(' ', '_').replace(':', '') + '.xlsx'
+                await query.message.reply_document(
+                    InputFile(output, safe_file_name),
+                    caption=f"{user_name}, отчет: {reports[0][6]}"
+                )
+            return
 
     except Exception as e:
         logger.error(f"Ошибка в handle_callback_query: {str(e)}")
-        await query.message.reply_text(f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup)
-
-await query.answer()
+        await query.message.reply_text(
+            f"{user_name}, ошибка: {str(e)}.", reply_markup=default_reply_markup
+        )
 
 # Функция для логирования запросов
 def log_request(user_id: int, request: str, response: str) -> None:
