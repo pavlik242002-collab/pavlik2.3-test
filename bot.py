@@ -1217,6 +1217,7 @@ async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 # Отображение содержимого папки в /documents/
+
 async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, is_return: bool = False) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
@@ -1226,21 +1227,22 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     if current_path == '/documents/':
         folder_name = "Документы для РО"
 
-    # === ВСЕГДА ЗАГРУЖАЕМ ФАЙЛЫ ЗАНОВО ===
+    # === ВСЕГДА ЗАГРУЖАЕМ ФАЙЛЫ ЗАНОВО С ЯНДЕКС.ДИСКА ===
     files = list_yandex_disk_files(current_path)
     dirs = list_yandex_disk_directories(current_path)
 
-    # === Клавиатура папок ===
+    # === КЛАВИАТУРА ПАПОК ===
     keyboard = [[dir_name] for dir_name in dirs]
     if current_path != '/documents/':
         keyboard.append(['Назад'])
     keyboard.append(['В главное меню'])
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    # === СОХРАНЯЕМ ПУТЬ И ФАЙЛЫ ===
+    # === СОХРАНЯЕМ В user_data ===
     context.user_data['current_path'] = current_path
     context.user_data['file_list'] = files
 
+    # === ЕСЛИ ЕСТЬ ФАЙЛЫ — ПОКАЗЫВАЕМ КНОПКИ ДЛЯ СКАЧИВАНИЯ ===
     if files:
         file_keyboard = [
             [InlineKeyboardButton(item['name'], callback_data=f"doc_download:{idx}")]
@@ -1252,34 +1254,13 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             reply_markup=file_reply_markup,
             parse_mode='Markdown'
         )
+    # === ЕСЛИ ФАЙЛОВ НЕТ — ПОКАЗЫВАЕМ ТОЛЬКО ПАПКИ ===
     else:
         await update.message.reply_text(
             f"*{folder_name}*:",
             reply_markup=reply_markup,
             parse_mode='Markdown'
         )
-
-# Отображение файлов в папке региона
-async def show_file_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id: int = update.effective_user.id
-    user_name = get_user_name(user_id)
-    profile = USER_PROFILES.get(user_id)
-    if not profile or not profile.get('region'):
-        await update.message.reply_text(f"{user_name}, регион не указан. Обратитесь к администратору.",
-                                        reply_markup=context.user_data.get('default_reply_markup'))
-        return
-    region_folder = f"/regions/{profile['region']}/"
-    create_yandex_folder(region_folder)
-    files = list_yandex_disk_files(region_folder)
-    context.user_data['current_path'] = region_folder
-    context.user_data['file_list'] = files
-    if files:
-        file_keyboard = [[InlineKeyboardButton(item['name'], callback_data=f"download:{idx}")] for idx, item in enumerate(files)]
-        reply_markup = InlineKeyboardMarkup(file_keyboard)
-        await update.message.reply_text(f"{user_name}, файлы в папке региона {profile['region']}:", reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(f"{user_name}, папка региона {profile['region']} пуста.",
-                                        reply_markup=context.user_data.get('default_reply_markup'))
 
 # Обработка callback-запросов
 
@@ -2085,12 +2066,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif user_input == "Документы для РО":
         context.user_data['current_mode'] = 'documents_nav'
         context.user_data['current_path'] = '/documents/'
-        context.user_data.pop('file_list', None)
-        context.user_data.pop('awaiting_upload', None)
         create_yandex_folder('/documents/')
         await show_current_docs(update, context)
         return
 
+    # ← ВСТАВЬ СЮДА ЭТОТ БЛОК ↓↓↓
+
+    # === НАЖАТИЕ НА ПАПКУ ВНУТРИ ДОКУМЕНТОВ ===
+    elif context.user_data.get('current_mode') == 'documents_nav' and user_input not in ["Назад", "В главное меню"]:
+        current_path = context.user_data.get('current_path', '/documents/')
+        dirs = list_yandex_disk_directories(current_path)
+        if user_input in dirs:
+            new_path = f"{current_path.rstrip('/')}/{user_input}/"
+            context.user_data['current_path'] = new_path
+            await show_current_docs(update, context)
+            return
     elif user_input == "Архив документов РО":
         if not is_admin_or_delta(user_id):
             await show_file_list(update, context)
@@ -2348,6 +2338,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
             )
         return
+
+    # ← ВСТАВЬ СЮДА ЭТОТ БЛОК ↓↓↓
+
+    # === КНОПКА "НАЗАД" (работает ВЕЗДЕ) ===
+    elif user_input == "Назад":
+        # Сбрасываем ожидание ID
+        context.user_data.pop("awaiting_delta_admin_id", None)
+        context.user_data.pop("awaiting_delete_delta_id", None)
+
+        # === НАВИГАЦИЯ ПО ДОКУМЕНТАМ ===
+        if context.user_data.get('current_mode') == 'documents_nav':
+            current_path = context.user_data.get('current_path', '/documents/')
+            if current_path == '/documents/':
+                context.user_data.pop('current_mode', None)
+                context.user_data.pop('current_path', None)
+                context.user_data.pop('file_list', None)
+                await show_main_menu(update, context)
+            else:
+                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
+                context.user_data['current_path'] = parent_path
+                await show_current_docs(update, context, is_return=True)
+        else:
+            await show_main_menu(update, context)
+        return
+
+    # === КНОПКА "В ГЛАВНОЕ МЕНЮ" (работает ВЕЗДЕ) ===
+    elif user_input == "В главное меню":
+        context.user_data.pop('current_mode', None)
+        context.user_data.pop('current_path', None)
+        context.user_data.pop('file_list', None)
+        await show_main_menu(update, context)
+        return
+
 
     # ← ВСТАВЬ СЮДА (перед строкой else:)
     elif user_input == "Назад":
