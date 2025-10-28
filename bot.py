@@ -2375,9 +2375,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
 
-    else:
-        response = await generate_ai_response(user_id, user_input, user_name, chat_id)
-
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
