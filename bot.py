@@ -1541,33 +1541,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text(f"{user_name}, ошибка при получении отчетов: {str(e)}.")
                 return
 
-            elif query.data.startswith("admin_download:"):
-            file_idx = int(query.data.split(":", 1)[1])
-            files = context.user_data.get('file_list', [])
-            if file_idx >= len(files):
-                await query.answer("Файл не найден.", show_alert=True)
-                return
-
-            file_name = files[file_idx]['name']
-            file_path = f"{context.user_data['current_path'].rstrip('/')}/{file_name}"
-            download_url = get_yandex_disk_file(file_path)
-
-            if not download_url:
-                await query.answer("Не удалось получить файл.", show_alert=True)
-                return
-
-            file_response = requests.get(download_url)
-            if file_response.status_code == 200:
-                await query.message.reply_document(
-                    InputFile(file_response.content, filename=file_name),
-                    caption="Готово!"
-                )
-                await query.answer()
-            else:
-                await query.answer("Ошибка скачивания.", show_alert=True)
-            return
-
-
             if not reports:
                 await query.message.reply_text(f"{user_name}, отчеты с названием '{safe_title}' не найдены.")
                 return
@@ -2470,9 +2443,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     else:
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
 
-# ──────────────────────────────────────────────────────
-# АРХИВ ДОКУМЕНТОВ РО — НАЧАЛО
-# ──────────────────────────────────────────────────────
+
 elif user_input == "Архив документов РО":
     if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, доступ запрещён.")
