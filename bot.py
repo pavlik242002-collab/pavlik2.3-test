@@ -1107,12 +1107,14 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ['Отчеты', 'Рассылки'],
             ['Файлы из папок']
         ]
+
     elif user_id in ALLOWED_DELTA_ADMINS:
-        # Дельта-админ
-        keyboard = base_buttons + [
+        # Дельта-админ — только нужные кнопки
+        keyboard = [
             ['Отчеты', 'Рассылки'],
             ['Файлы из папок']
         ]
+
     else:
         # Обычный пользователь
         keyboard = base_buttons
@@ -1205,10 +1207,27 @@ async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(f"{user_name}, выберите тип рассылки:", reply_markup=reply_markup)
 
-
 async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
+
+    # === ДЕЛЬТА-АДМИН: сразу в свой архив ===
+    if user_id in ALLOWED_DELTA_ADMINS:
+        profile = USER_PROFILES.get(user_id)
+        if not profile or not profile.get('region'):
+            await update.message.reply_text(
+                f"{user_name}, ваш регион не указан. Обратитесь к администратору.",
+                reply_markup=context.user_data.get('default_reply_markup')
+            )
+            return
+
+        context.user_data['current_mode'] = 'archive_nav'
+        context.user_data['current_path'] = f"/regions/{profile['region']}/"
+        create_yandex_folder(context.user_data['current_path'])
+        await show_user_archive(update, context)
+        return
+
+    # === ДЛЯ ВСЕХ ОСТАЛЬНЫХ (админы и пользователи) ===
     keyboard = [
         ['Документы для РО', 'Архив документов РО'],
         ['Загрузить файл', 'Назад']
@@ -1262,8 +1281,45 @@ async def show_current_docs(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             parse_mode='Markdown'
         )
 
-# Обработка callback-запросов
+async def show_user_archive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id: int = update.effective_user.id
+    user_name = get_user_name(user_id)
+    profile = USER_PROFILES.get(user_id)
 
+    if not profile or not profile.get('region'):
+        await update.message.reply_text(f"{user_name}, регион не указан.")
+        return
+
+    current_path = f"/regions/{profile['region']}/"
+    folder_name = f"Архив: {profile['region']}"
+
+    files = list_yandex_disk_files(current_path)
+    context.user_data['current_path'] = current_path
+    context.user_data['file_list'] = files
+
+    if files:
+        file_keyboard = [
+            [InlineKeyboardButton(f"📄 {item['name']}", callback_data=f"download:{idx}")]
+            for idx, item in enumerate(files)
+        ]
+        file_reply_markup = InlineKeyboardMarkup(file_keyboard)
+        await update.message.reply_text(
+            f"*{folder_name}*",
+            reply_markup=file_reply_markup,
+            parse_mode='Markdown'
+        )
+    else:
+        keyboard = [['Назад'], ['В главное меню']]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            f"*{folder_name}*: файлов нет.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+
+
+
+# Обработка callback-запросов
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()                                   # <-- подтверждение callback-запроса
@@ -1583,7 +1639,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                                            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
             return
         await update.message.reply_text("Сначала пройдите регистрацию с /start.")
-        return
 
     # Устанавливаем клавиатуру по умолчанию в зависимости от роли пользователя
     if user_id in ALLOWED_ADMINS:
@@ -1973,6 +2028,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop('current_answers', None)
         return
 
+    # === КНОПКА "НАЗАД" — ВСЕГДА В ГЛАВНОЕ МЕНЮ ===
+    elif user_input == "Назад":
+        context.user_data.pop('current_mode', None)
+        context.user_data.pop('current_path', None)
+        context.user_data.pop('file_list', None)
+        context.user_data.pop('awaiting_delta_admin_id', None)
+        context.user_data.pop('awaiting_delete_delta_id', None)
+        context.user_data.pop('awaiting_report_title', None)
+        context.user_data.pop('awaiting_reminder_interval', None)
+        context.user_data.pop('awaiting_report_questions', None)
+        context.user_data.pop('current_questions', None)
+        context.user_data.pop('question_index', None)
+        context.user_data.pop('awaiting_broadcast', None)
+        context.user_data.pop('broadcast_type', None)
+        context.user_data.pop('awaiting_broadcast_export_week', None)
+        context.user_data.pop('awaiting_region_selection', None)
+        context.user_data.pop('selected_region', None)
+        context.user_data.pop('admin_archive_action', None)
+        context.user_data.pop('admin_region_files', None)
+        await show_main_menu(update, context)
+        return
+
+    # === КНОПКА "В ГЛАВНОЕ МЕНЮ" — ВСЕГДА ===
+    elif user_input == "В главное меню":
+        context.user_data.pop('current_mode', None)
+        context.user_data.pop('current_path', None)
+        context.user_data.pop('file_list', None)
+        context.user_data.pop('awaiting_delta_admin_id', None)
+        context.user_data.pop('awaiting_delete_delta_id', None)
+        context.user_data.pop('awaiting_report_title', None)
+        context.user_data.pop('awaiting_reminder_interval', None)
+        context.user_data.pop('awaiting_report_questions', None)
+        context.user_data.pop('current_questions', None)
+        context.user_data.pop('question_index', None)
+        context.user_data.pop('awaiting_broadcast', None)
+        context.user_data.pop('broadcast_type', None)
+        context.user_data.pop('awaiting_broadcast_export_week', None)
+        context.user_data.pop('awaiting_region_selection', None)
+        context.user_data.pop('selected_region', None)
+        context.user_data.pop('admin_archive_action', None)
+        context.user_data.pop('admin_region_files', None)
+        await show_main_menu(update, context)
+        return
+
     if user_input == "Управление пользователями":
         if user_id not in ALLOWED_ADMINS:
             await update.message.reply_text(f"{user_name}, только администраторы могут управлять пользователями.",
@@ -2043,9 +2142,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     elif user_input == "Файлы из папок":
         if not is_admin_or_delta(user_id):
-            await update.message.reply_text(f"{user_name}, только администраторы могут управлять файлами.", reply_markup=default_reply_markup)
+            await update.message.reply_text(f"{user_name}, доступ запрещён.", reply_markup=default_reply_markup)
             return
 
+        # Дельта-админ → сразу в архив
+        if user_id in ALLOWED_DELTA_ADMINS:
+            await show_files_menu(update, context)
+            return
+
+        # Полный ажмин → старое меню
         keyboard = [
             ['Документы для РО'],
             ['Архив документов РО'],
@@ -2054,7 +2159,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(f"{user_name}, выберите раздел:", reply_markup=reply_markup)
         return
-
 
     elif user_input == "Загрузить файл":
         context.user_data["awaiting_upload"] = True
@@ -2081,26 +2185,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data['current_path'] = new_path
             await show_current_docs(update, context)
             return
-    elif user_input == "Архив документов РО":
-        if not is_admin_or_delta(user_id):
-            await show_file_list(update, context)
-            return
-
-        keyboard = [
-            ['Скачать файл'],
-            ['Удалить файл'],
-            ['Назад']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
-        return
-
-    elif user_input == "Скачать файл":
-        if not is_admin_or_delta(user_id):
-            await update.message.reply_text(f"{user_name}, доступ запрещён.", reply_markup=default_reply_markup)
-            return
-        await show_regions_list(update, context, action="download")
-        return
 
     elif user_input == "Удалить файл":
         if not is_admin_or_delta(user_id):
@@ -2337,61 +2421,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"{user_name}, введите корректный ID (число).",
                 reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
             )
-        return
-
-    # ← ВСТАВЬ СЮДА ЭТОТ БЛОК ↓↓↓
-
-    # === КНОПКА "НАЗАД" (работает ВЕЗДЕ) ===
-    elif user_input == "Назад":
-        # Сбрасываем ожидание ID
-        context.user_data.pop("awaiting_delta_admin_id", None)
-        context.user_data.pop("awaiting_delete_delta_id", None)
-
-        # === НАВИГАЦИЯ ПО ДОКУМЕНТАМ ===
-        if context.user_data.get('current_mode') == 'documents_nav':
-            current_path = context.user_data.get('current_path', '/documents/')
-            if current_path == '/documents/':
-                context.user_data.pop('current_mode', None)
-                context.user_data.pop('current_path', None)
-                context.user_data.pop('file_list', None)
-                await show_main_menu(update, context)
-            else:
-                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
-                context.user_data['current_path'] = parent_path
-                await show_current_docs(update, context, is_return=True)
-        else:
-            await show_main_menu(update, context)
-        return
-
-    # === КНОПКА "В ГЛАВНОЕ МЕНЮ" (работает ВЕЗДЕ) ===
-    elif user_input == "В главное меню":
-        context.user_data.pop('current_mode', None)
-        context.user_data.pop('current_path', None)
-        context.user_data.pop('file_list', None)
-        await show_main_menu(update, context)
-        return
-
-
-    # ← ВСТАВЬ СЮДА (перед строкой else:)
-    elif user_input == "Назад":
-        # Сбрасываем ожидание ID delta-админа
-        context.user_data.pop("awaiting_delta_admin_id", None)
-        context.user_data.pop("awaiting_delete_delta_id", None)
-
-        # === НАВИГАЦИЯ ПО ДОКУМЕНТАМ (остаётся как было) ===
-        if context.user_data.get('current_mode') == 'documents_nav':
-            current_path = context.user_data.get('current_path', '/documents/')
-            if current_path == '/documents/':
-                context.user_data.pop('current_mode', None)
-                context.user_data.pop('current_path', None)
-                context.user_data.pop('file_list', None)
-                await show_main_menu(update, context)
-            else:
-                parent_path = '/'.join(current_path.rstrip('/').split('/')[:-1]) + '/'
-                context.user_data['current_path'] = parent_path
-                await show_current_docs(update, context, is_return=True)
-        else:
-            await show_main_menu(update, context)
         return
 
     else:
