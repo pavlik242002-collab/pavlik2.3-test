@@ -2444,10 +2444,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
 
 
-elif user_input == "Архив документов РО":
-    if not is_admin_or_delta(user_id):
-        await update.message.reply_text(f"{user_name}, доступ запрещён.")
-        return
+if user_input == "Архив документов РО":
     context.user_data["awaiting_federal_district_archive"] = True
     keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
     keyboard.append(['Назад'])
