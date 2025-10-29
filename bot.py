@@ -2444,80 +2444,83 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
 
 
-if user_input == "Архив документов РО":
-    context.user_data["awaiting_federal_district_archive"] = True
-    keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
-    keyboard.append(['Назад'])
-    await update.message.reply_text(
-        "Выберите федеральный округ:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
-    return
 
-# — Выбор округа —
-if context.user_data.get("awaiting_federal_district_archive"):
-    if user_input == "Назад":
-        context.user_data.pop("awaiting_federal_district_archive", None)
-        await show_files_menu(update, context)
-        return
-    if user_input in FEDERAL_DISTRICTS:
-        context.user_data["selected_federal_district"] = user_input
-        context.user_data["awaiting_federal_district_archive"] = False
-        context.user_data["awaiting_region_archive"] = True
-        regions = FEDERAL_DISTRICTS[user_input]
-        keyboard = [[region] for region in regions]
-        keyboard.append(['Назад'])
-        await update.message.reply_text(
-            "Выберите регион:",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
-        return
-    await update.message.reply_text("Выберите из списка.")
-    return
-
-# — Выбор региона —
-if context.user_data.get("awaiting_region_archive"):
-    if user_input == "Назад":
-        context.user_data.pop("awaiting_region_archive", None)
+    # — АРХИВ ДОКУМЕНТОВ РО —
+    if user_input == "Архив документов РО":
         context.user_data["awaiting_federal_district_archive"] = True
         keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
+        keyboard.append(['Назад'])
         await update.message.reply_text(
             "Выберите федеральный округ:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return
 
-    district = context.user_data.get("selected_federal_district")
-    if district and user_input in FEDERAL_DISTRICTS.get(district, []):
-        # Очистка состояния
-        context.user_data.pop("awaiting_region_archive", None)
-        context.user_data.pop("selected_federal_district", None)
-
-        folder_path = f"/regions/{user_input}/"
-        create_yandex_folder(folder_path)
-        files = list_yandex_disk_files(folder_path)
-
-        context.user_data['current_path'] = folder_path
-        context.user_data['file_list'] = files
-
-        if files:
-            file_keyboard = [
-                [InlineKeyboardButton(f"📄 {item['name']}", callback_data=f"admin_download:{idx}")]
-                for idx, item in enumerate(files)
-            ]
-            reply_markup = InlineKeyboardMarkup(file_keyboard)
-            await update.message.reply_text(
-                f"*{user_input}* — файлы:",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text(f"*{user_input}*: файлов нет.", parse_mode='Markdown')
+    # — Выбор округа —
+    if context.user_data.get("awaiting_federal_district_archive"):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_federal_district_archive", None)
             await show_files_menu(update, context)
+            return
+        if user_input in FEDERAL_DISTRICTS:
+            context.user_data["selected_federal_district"] = user_input
+            context.user_data["awaiting_federal_district_archive"] = False
+            context.user_data["awaiting_region_archive"] = True
+            regions = FEDERAL_DISTRICTS[user_input]
+            keyboard = [[region] for region in regions]
+            keyboard.append(['Назад'])
+            await update.message.reply_text(
+                "Выберите регион:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+        await update.message.reply_text("Выберите из списка.")
         return
 
-    await update.message.reply_text("Выберите регион из списка.")
-    return
+    # — Выбор региона —
+    if context.user_data.get("awaiting_region_archive"):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_region_archive", None)
+            context.user_data["awaiting_federal_district_archive"] = True
+            keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
+            await update.message.reply_text(
+                "Выберите федеральный округ:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+
+        district = context.user_data.get("selected_federal_district")
+        if district and user_input in FEDERAL_DISTRICTS.get(district, []):
+            # Очистка состояния
+            context.user_data.pop("awaiting_region_archive", None)
+            context.user_data.pop("selected_federal_district", None)
+
+            folder_path = f"/regions/{user_input}/"
+            create_yandex_folder(folder_path)
+            files = list_yandex_disk_files(folder_path)
+
+            context.user_data['current_path'] = folder_path
+            context.user_data['file_list'] = files
+
+            if files:
+                file_keyboard = [
+                    [InlineKeyboardButton(f"📄 {item['name']}", callback_data=f"admin_download:{idx}")]
+                    for idx, item in enumerate(files)
+                ]
+                reply_markup = InlineKeyboardMarkup(file_keyboard)
+                await update.message.reply_text(
+                    f"*{user_input}* — файлы:",
+                    reply_markup=reply_markup,
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(f"*{user_input}*: файлов нет.", parse_mode='Markdown')
+                await show_files_menu(update, context)
+            return
+
+        await update.message.reply_text("Выберите регион из списка.")
+        return
+
 # ──────────────────────────────────────────────────────
 # АРХИВ ДОКУМЕНТОВ РО — КОНЕЦ
 # ──────────────────────────────────────────────────────
