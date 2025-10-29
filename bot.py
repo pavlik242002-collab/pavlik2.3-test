@@ -450,19 +450,25 @@ def load_allowed_delta_admins() -> List[int]:
         return []
 
 def is_admin_or_delta(user_id: int) -> bool:
+    """Возвращает True, если пользователь — главный админ или delta‑админ."""
     return user_id in ALLOWED_ADMINS or user_id in ALLOWED_DELTA_ADMINS
 
 def save_allowed_delta_admins(delta_admins: List[int]) -> None:
+    """Сохраняет список delta‑админов в БД. При ошибке — откат."""
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM allowed_delta_admins")
             for d_id in delta_admins:
-                cur.execute("INSERT INTO allowed_delta_admins (id) VALUES (%s)", (d_id,))
+                cur.execute(
+                    "INSERT INTO allowed_delta_admins (id) VALUES (%s) ON CONFLICT (id) DO NOTHING",
+                    (d_id,)
+                )
             conn.commit()
-            logger.info(f"Сохранено {len(delta_admins)} delta-админов")
+            logger.info(f"Сохранено {len(delta_admins)} delta‑админов в БД")
     except Exception as e:
-        logger.error(f"Ошибка при сохранении allowed_delta_admins: {str(e)}")
+        logger.error(f"Ошибка сохранения delta‑админов: {e}")
         conn.rollback()
+
 
 def save_allowed_admins(allowed_admins: List[int]) -> None:
     try:
@@ -1094,59 +1100,42 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
 
-    # ---------- ОСНОВНОЕ МЕНЮ ----------
+    # Базовые кнопки для всех
     base_buttons = [
         ['Документы для РО', 'Архив документов РО'],
         ['Загрузить файл']
     ]
 
-    if user_id in ALLOWED_ADMINS:
-        # Полный админ
-        keyboard = [
-            ['Управление пользователями', 'Управление фактами'],
-            ['Отчеты', 'Рассылки'],
-            ['Файлы из папок']
-        ]
-
-    elif user_id in ALLOWED_DELTA_ADMINS:
-        # Дельта-админ — только нужные кнопки
-        keyboard = [
-            ['Отчеты', 'Рассылки'],
-            ['Файлы из папок']
-        ]
-
+    # Формируем клавиатуру
+    if is_admin_or_delta(user_id):
+        if user_id in ALLOWED_ADMINS:
+            keyboard = [
+                ['Управление пользователями', 'Управление фактами'],
+                ['Отчеты', 'Рассылки'],
+                ['Файлы из папок']
+            ]
+        else:  # delta‑админ
+            keyboard = [
+                ['Отчеты', 'Рассылки'],
+                ['Файлы из папок']
+            ]
     else:
-        # Обычный пользователь
         keyboard = base_buttons
 
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     context.user_data['default_reply_markup'] = reply_markup
-    context.user_data.pop('current_mode', None)
-    context.user_data.pop('current_path', None)
-    context.user_data.pop('file_list', None)
-    context.user_data.pop('awaiting_user_id', None)
-    context.user_data.pop('awaiting_admin_id', None)
-    context.user_data.pop('awaiting_delete_admin_id', None)
-    context.user_data.pop('awaiting_upload', None)
-    context.user_data.pop('awaiting_fact_id', None)
-    context.user_data.pop('awaiting_delete_user_id', None)
-    context.user_data.pop('awaiting_new_fact', None)
-    context.user_data.pop('awaiting_broadcast', None)
-    context.user_data.pop('broadcast_type', None)
-    context.user_data.pop('awaiting_report_week', None)
-    context.user_data.pop('awaiting_export_week', None)
-    context.user_data.pop('awaiting_broadcast_export_week', None)
-    context.user_data.pop('awaiting_report_title', None)
-    context.user_data.pop('awaiting_report_questions', None)
-    context.user_data.pop('current_questions', None)
-    context.user_data.pop('question_index', None)
-    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
+    # Очистка состояния
+    keys_to_clear = [k for k in context.user_data.keys() if k != 'default_reply_markup']
+    for k in keys_to_clear:
+        context.user_data.pop(k, None)
+
+    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
 
 async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
+    if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, только администраторы могут управлять пользователями.",
                                        reply_markup=context.user_data.get('default_reply_markup'))
         return
@@ -1165,7 +1154,7 @@ async def show_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def show_facts_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
+    if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, только администраторы могут управлять фактами.",
                                        reply_markup=context.user_data.get('default_reply_markup'))
         return
@@ -1179,7 +1168,7 @@ async def show_facts_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
+    if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, только администраторы могут управлять отчетами.",
                                        reply_markup=context.user_data.get('default_reply_markup'))
         return
@@ -1196,7 +1185,7 @@ async def show_reports_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def show_broadcast_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
+    if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
                                        reply_markup=context.user_data.get('default_reply_markup'))
         return
@@ -1211,29 +1200,17 @@ async def show_files_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id: int = update.effective_user.id
     user_name = get_user_name(user_id)
 
-    # === ДЕЛЬТА-АДМИН: сразу в свой архив ===
-    if user_id in ALLOWED_DELTA_ADMINS:
-        profile = USER_PROFILES.get(user_id)
-        if not profile or not profile.get('region'):
-            await update.message.reply_text(
-                f"{user_name}, ваш регион не указан. Обратитесь к администратору.",
-                reply_markup=context.user_data.get('default_reply_markup')
-            )
-            return
-
-        context.user_data['current_mode'] = 'archive_nav'
-        context.user_data['current_path'] = f"/regions/{profile['region']}/"
-        create_yandex_folder(context.user_data['current_path'])
-        await show_user_archive(update, context)
+    if not is_admin_or_delta(user_id):
+        await update.message.reply_text(f"{user_name}, доступ запрещён.")
         return
 
-    # === ДЛЯ ВСЕХ ОСТАЛЬНЫХ (админы и пользователи) ===
     keyboard = [
-        ['Документы для РО', 'Архив документов РО'],
-        ['Загрузить файл', 'Назад']
+        ['Документы для РО'],
+        ['Архив документов РО'],
+        ['Назад']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(f"{user_name}, выберите действие:", reply_markup=reply_markup)
+    await update.message.reply_text(f"{user_name}, выберите раздел:", reply_markup=reply_markup)
 
 # Отображение содержимого папки в /documents/
 
@@ -1564,6 +1541,33 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.message.reply_text(f"{user_name}, ошибка при получении отчетов: {str(e)}.")
                 return
 
+            elif query.data.startswith("admin_download:"):
+            file_idx = int(query.data.split(":", 1)[1])
+            files = context.user_data.get('file_list', [])
+            if file_idx >= len(files):
+                await query.answer("Файл не найден.", show_alert=True)
+                return
+
+            file_name = files[file_idx]['name']
+            file_path = f"{context.user_data['current_path'].rstrip('/')}/{file_name}"
+            download_url = get_yandex_disk_file(file_path)
+
+            if not download_url:
+                await query.answer("Не удалось получить файл.", show_alert=True)
+                return
+
+            file_response = requests.get(download_url)
+            if file_response.status_code == 200:
+                await query.message.reply_document(
+                    InputFile(file_response.content, filename=file_name),
+                    caption="Готово!"
+                )
+                await query.answer()
+            else:
+                await query.answer("Ошибка скачивания.", show_alert=True)
+            return
+
+
             if not reports:
                 await query.message.reply_text(f"{user_name}, отчеты с названием '{safe_title}' не найдены.")
                 return
@@ -1751,7 +1755,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get('awaiting_broadcast', False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут делать рассылки.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop('awaiting_broadcast', None)
@@ -1790,7 +1794,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_fact_id", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_fact_id", None)
@@ -1815,7 +1819,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_new_fact", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять факты.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_new_fact", None)
@@ -1838,7 +1842,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_user_id", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_user_id", None)
@@ -1861,7 +1865,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_admin_id", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять администраторов.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_admin_id", None)
@@ -1884,7 +1888,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_delete_user_id", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять пользователей.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_delete_user_id", None)
@@ -1915,7 +1919,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if context.user_data.get("awaiting_delete_admin_id", False):
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять администраторов.",
                                            reply_markup=default_reply_markup)
             context.user_data.pop("awaiting_delete_admin_id", None)
@@ -2073,7 +2077,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     if user_input == "Управление пользователями":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут управлять пользователями.",
                                            reply_markup=default_reply_markup)
             return
@@ -2081,7 +2085,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Управление фактами":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут управлять фактами.",
                                            reply_markup=default_reply_markup)
             return
@@ -2194,7 +2198,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Добавить пользователя":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять пользователей.",
                                            reply_markup=default_reply_markup)
             return
@@ -2205,7 +2209,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Добавить администратора":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут добавлять администраторов.",
                                            reply_markup=default_reply_markup)
             return
@@ -2216,7 +2220,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Список пользователей":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут просматривать список пользователей.",
                 reply_markup=default_reply_markup)
@@ -2228,7 +2232,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Список администраторов":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут просматривать список администраторов.",
                 reply_markup=default_reply_markup)
@@ -2240,7 +2244,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Удалить пользователя":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять пользователей.",
                                            reply_markup=default_reply_markup)
             return
@@ -2253,7 +2257,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Удалить администратора":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут удалять администраторов.",
                                            reply_markup=default_reply_markup)
             return
@@ -2266,7 +2270,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Выгрузить пользователей в Excel":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут выгружать данные пользователей.",
                                            reply_markup=default_reply_markup)
             return
@@ -2288,7 +2292,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Выгрузить администраторов в Excel":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут выгружать данные администраторов.",
                 reply_markup=default_reply_markup)
@@ -2339,7 +2343,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Добавить delta-админа":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут добавлять delta-админов.",
                 reply_markup=default_reply_markup
@@ -2352,8 +2356,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
+    # ──────────────────────────────────────────────────────
+    # 1. Кнопка «Добавить delta‑админа»
+    # ──────────────────────────────────────────────────────
+    elif user_input == "Добавить delta-админа":
+        if not is_admin_or_delta(user_id):
+            await update.message.reply_text(f"{user_name}, только администраторы могут добавлять delta‑админов.")
+            return
+        context.user_data["awaiting_delta_admin_id"] = True
+        await update.message.reply_text(
+            f"{user_name}, введите user_id нового delta‑админа:",
+            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
+        )
+        return
+
+    # ──────────────────────────────────────────────────────
+    # 2. Обработка ввода ID (вставь ПОСЛЕ всех других elif)
+    # ──────────────────────────────────────────────────────
+    if context.user_data.get("awaiting_delta_admin_id"):
+        if user_input == "Назад":
+            context.user_data.pop("awaiting_delta_admin_id", None)
+            await show_main_menu(update, context)
+            return
+
+        try:
+            new_id = int(user_input)
+            if new_id == user_id:
+                await update.message.reply_text("Нельзя добавить самого себя.")
+            elif new_id in ALLOWED_DELTA_ADMINS:
+                await update.message.reply_text(f"Delta‑админ {new_id} уже есть.")
+            elif new_id in ALLOWED_ADMINS:
+                await update.message.reply_text(f"{new_id} — главный админ.")
+            else:
+                ALLOWED_DELTA_ADMINS.append(new_id)
+                save_allowed_delta_admins(ALLOWED_DELTA_ADMINS)  # ← КЛЮЧЕВАЯ СТРОКА
+                await update.message.reply_text(f"Delta‑админ {new_id} добавлен и сохранён в БД.")
+            context.user_data.pop("awaiting_delta_admin_id", None)
+        except ValueError:
+            await update.message.reply_text("Введите корректный числовой ID.")
+        return
+
     elif user_input == "Список delta-админов":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут просматривать список delta-админов.",
                 reply_markup=default_reply_markup
@@ -2367,7 +2411,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     elif user_input == "Удалить delta-админа":
-        if user_id not in ALLOWED_ADMINS:
+        if not is_admin_or_delta(user_id):
             await update.message.reply_text(
                 f"{user_name}, только администраторы могут удалять delta-админов.",
                 reply_markup=default_reply_markup
@@ -2425,6 +2469,91 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     else:
         response = await generate_ai_response(user_id, user_input, user_name, chat_id)
+
+# ──────────────────────────────────────────────────────
+# АРХИВ ДОКУМЕНТОВ РО — НАЧАЛО
+# ──────────────────────────────────────────────────────
+elif user_input == "Архив документов РО":
+    if not is_admin_or_delta(user_id):
+        await update.message.reply_text(f"{user_name}, доступ запрещён.")
+        return
+    context.user_data["awaiting_federal_district_archive"] = True
+    keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
+    keyboard.append(['Назад'])
+    await update.message.reply_text(
+        "Выберите федеральный округ:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+    return
+
+# — Выбор округа —
+if context.user_data.get("awaiting_federal_district_archive"):
+    if user_input == "Назад":
+        context.user_data.pop("awaiting_federal_district_archive", None)
+        await show_files_menu(update, context)
+        return
+    if user_input in FEDERAL_DISTRICTS:
+        context.user_data["selected_federal_district"] = user_input
+        context.user_data["awaiting_federal_district_archive"] = False
+        context.user_data["awaiting_region_archive"] = True
+        regions = FEDERAL_DISTRICTS[user_input]
+        keyboard = [[region] for region in regions]
+        keyboard.append(['Назад'])
+        await update.message.reply_text(
+            "Выберите регион:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    await update.message.reply_text("Выберите из списка.")
+    return
+
+# — Выбор региона —
+if context.user_data.get("awaiting_region_archive"):
+    if user_input == "Назад":
+        context.user_data.pop("awaiting_region_archive", None)
+        context.user_data["awaiting_federal_district_archive"] = True
+        keyboard = [[district] for district in FEDERAL_DISTRICTS.keys()]
+        await update.message.reply_text(
+            "Выберите федеральный округ:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+
+    district = context.user_data.get("selected_federal_district")
+    if district and user_input in FEDERAL_DISTRICTS.get(district, []):
+        # Очистка состояния
+        context.user_data.pop("awaiting_region_archive", None)
+        context.user_data.pop("selected_federal_district", None)
+
+        folder_path = f"/regions/{user_input}/"
+        create_yandex_folder(folder_path)
+        files = list_yandex_disk_files(folder_path)
+
+        context.user_data['current_path'] = folder_path
+        context.user_data['file_list'] = files
+
+        if files:
+            file_keyboard = [
+                [InlineKeyboardButton(f"📄 {item['name']}", callback_data=f"admin_download:{idx}")]
+                for idx, item in enumerate(files)
+            ]
+            reply_markup = InlineKeyboardMarkup(file_keyboard)
+            await update.message.reply_text(
+                f"*{user_input}* — файлы:",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(f"*{user_input}*: файлов нет.", parse_mode='Markdown')
+            await show_files_menu(update, context)
+        return
+
+    await update.message.reply_text("Выберите регион из списка.")
+    return
+# ──────────────────────────────────────────────────────
+# АРХИВ ДОКУМЕНТОВ РО — КОНЕЦ
+# ──────────────────────────────────────────────────────
+
 
 # Обработка загруженных документов
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2632,7 +2761,7 @@ async def delete_yandex_file(file_path: str) -> bool:
 async def stop_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     user_name = get_user_name(user_id)
-    if user_id not in ALLOWED_ADMINS:
+    if not is_admin_or_delta(user_id):
         await update.message.reply_text(f"{user_name}, только администраторы могут останавливать напоминания.")
         return
 
