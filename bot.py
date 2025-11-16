@@ -904,6 +904,32 @@ def create_yandex_folder(folder_path: str) -> bool:
 
 def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict[str, str]]:
     folder_path = folder_path.rstrip('/')
+    items = []
+    offset = 0
+    limit = 100
+    while True:
+        url = f'https://cloud-api.yandex.net/v1/disk/resources?path={quote(folder_path)}&fields=_embedded.items.name,_embedded.items.type,_embedded.items.path&limit={limit}&offset={offset}'
+        headers = {'Authorization': f'OAuth {YANDEX_TOKEN}'}
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                new_items = response.json().get('_embedded', {}).get('items', [])
+                items.extend(new_items)
+                if len(new_items) < limit:
+                    break  # Конец списка
+                offset += limit
+            else:
+                logger.error(f"Ошибка: {response.status_code} - {response.text}")
+                break
+        except Exception as e:
+            logger.error(f"Ошибка: {str(e)}")
+            break
+    if item_type:
+        return [item for item in items if item['type'] == item_type]
+    return items
+
+def list_yandex_disk_items(folder_path: str, item_type: str = None) -> List[Dict[str, str]]:
+    folder_path = folder_path.rstrip('/')
     url = f'https://cloud-api.yandex.net/v1/disk/resources?path={quote(folder_path)}&fields=_embedded.items.name,_embedded.items.type,_embedded.items.path&limit=100'
     headers = {'Authorization': f'OAuth {YANDEX_TOKEN}'}
     try:
@@ -1048,23 +1074,27 @@ async def generate_ai_response(user_id: int, user_input: str, user_name: str, ch
     if len(messages) > 20:
         messages = messages[:1] + messages[-19:]
 
-    models_to_try = [XAI_MODEL, "grok", "grok-3", "grok-4"]
+    models_to_try = [XAI_MODEL, "grok", "grok-4"]  # Убрали дубликат "grok-3"
     ai_response = "Извините, не удалось получить ответ от API. Проверьте подписку на SuperGrok или X Premium+."
 
+    import time  # Добавляем для retry
     for model in models_to_try:
-        try:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.7,
-                stream=False
-            )
-            ai_response = completion.choices[0].message.content.strip()
-            logger.info(f"Ответ модели {model} для user_id {user_id}: {ai_response[:100]}...")
-            break
-        except Exception as e:
-            logger.error(f"Ошибка для {model}: {str(e)}")
-            continue
+        for attempt in range(3):  # Retry 3 раза
+            try:
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=0.7,
+                    stream=False
+                )
+                ai_response = completion.choices[0].message.content.strip()
+                logger.info(f"Ответ модели {model} для user_id {user_id}: {ai_response[:100]}...")
+                break
+            except Exception as e:
+                logger.error(f"Ошибка для {model} (попытка {attempt+1}): {str(e)}")
+                time.sleep(2)  # Задержка перед retry
+                if attempt == 2:
+                    continue  # Переходим к следующей модели
 
     histories[chat_id]["messages"].append({"role": "assistant", "content": ai_response})
     return ai_response
@@ -1776,6 +1806,84 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop("awaiting_fact_id", None)
             await show_facts_menu(update, context)
             return
+
+        if context.user_data.get("awaiting_report_title", False):
+            if user_input == "Назад":
+                context.user_data.pop("awaiting_report_title", None)
+                await show_reports_menu(update, context)
+                return
+            title = user_input.strip()
+            context.user_data["report_title"] = title
+            context.user_data.pop("awaiting_report_title", None)
+            context.user_data["awaiting_reminder_interval"] = True
+            await update.message.reply_text(f"{user_name}, введите интервал напоминаний в минутах (по умолчанию 60):",
+                                            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+
+        if context.user_data.get("awaiting_reminder_interval", False):
+            if user_input == "Назад":
+                context.user_data.pop("awaiting_reminder_interval", None)
+                await show_reports_menu(update, context)
+                return
+            try:
+                interval = int(user_input) if user_input.strip() else 60
+            except ValueError:
+                await update.message.reply_text(f"{user_name}, введите число (минуты).")
+                return
+            context.user_data["reminder_interval"] = interval
+            context.user_data.pop("awaiting_reminder_interval", None)
+            context.user_data["awaiting_report_questions"] = True
+            context.user_data["current_questions"] = []
+            await update.message.reply_text(
+                f"{user_name}, введите вопросы по одному. Закончите словом 'Готово'. Первый вопрос:",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+
+        if context.user_data.get("awaiting_report_questions", False):
+            if user_input == "Назад":
+                context.user_data.pop("awaiting_report_questions", None)
+                context.user_data.pop("current_questions", None)
+                await show_reports_menu(update, context)
+                return
+            if user_input.lower() == "готово":
+                questions = context.user_data["current_questions"]
+                if not questions:
+                    await update.message.reply_text(f"{user_name}, добавьте хотя бы один вопрос.")
+                    return
+                title = context.user_data["report_title"]
+                interval = context.user_data["reminder_interval"]
+                week_number = datetime.now().isocalendar()[1]  # Авто-неделя
+                year = datetime.now().year
+                report_id = str(uuid.uuid4())
+                create_report(report_id, user_id, questions, week_number, year, title, interval)
+                await update.message.reply_text(f"{user_name}, отчет '{title}' создан с {len(questions)} вопросами.")
+                context.user_data.pop("awaiting_report_questions", None)
+                context.user_data.pop("current_questions", None)
+                context.user_data.pop("report_title", None)
+                context.user_data.pop("reminder_interval", None)
+                await show_reports_menu(update, context)
+                return
+            context.user_data["current_questions"].append(user_input.strip())
+            await update.message.reply_text(f"{user_name}, следующий вопрос (или 'Готово'):")
+            return
+
+        elif user_input in ["Назад", "В главное меню"]:
+            # Полная очистка всех возможных состояний
+            keys_to_clear = [
+                'current_mode', 'current_path', 'file_list', 'awaiting_delta_admin_id', 'awaiting_delete_delta_id',
+                'awaiting_report_title', 'awaiting_reminder_interval', 'awaiting_report_questions', 'current_questions',
+                'question_index', 'awaiting_broadcast', 'broadcast_type', 'awaiting_broadcast_export_week',
+                'awaiting_region_selection', 'selected_region', 'admin_archive_action', 'admin_region_files',
+                'awaiting_federal_district', 'awaiting_region', 'awaiting_name', 'awaiting_fio', 'awaiting_user_id',
+                'awaiting_admin_id', 'awaiting_delete_user_id', 'awaiting_delete_admin_id', 'awaiting_new_fact',
+                'awaiting_fact_id', 'awaiting_upload', 'selected_federal_district', 'awaiting_federal_district_archive',
+                'awaiting_region_archive'
+            ]
+            for key in keys_to_clear:
+                context.user_data.pop(key, None)
+            await show_main_menu(update, context)
+            return
+
         try:
             fact_id = int(user_input)
             if delete_knowledge_fact(fact_id, user_id):
@@ -2065,10 +2173,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await show_facts_menu(update, context)
         return
 
+    elif user_input == "Все факты":
+        if not is_admin_or_delta(user_id):
+            await update.message.reply_text(f"{user_name}, только администраторы могут просматривать факты.",
+                                           reply_markup=default_reply_markup)
+            return
+        facts_list = "\n".join([f"ID {f['id']}: {f['text'][:100]}..." for f in KNOWLEDGE_BASE]) or "База знаний пуста."
+        await update.message.reply_text(f"{user_name}, все факты:\n{facts_list}",
+                                       reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+    elif user_input == "Удалить факт":
+        if not is_admin_or_delta(user_id):
+            await update.message.reply_text(f"{user_name}, только администраторы могут удалять факты.",
+                                           reply_markup=default_reply_markup)
+            return
+        context.user_data["awaiting_fact_id"] = True
+        facts_list = "\n".join([f"ID {f['id']}: {f['text'][:50]}..." for f in KNOWLEDGE_BASE]) or "База знаний пуста."
+        await update.message.reply_text(f"{user_name}, список фактов для удаления:\n{facts_list}\n\nВведите ID факта:",
+                                       reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+        return
+
+
     elif user_input == "Отчеты":
         if not is_admin_or_delta(user_id):
             await update.message.reply_text(f"{user_name}, только администраторы могут управлять отчетами.",
                                             reply_markup=default_reply_markup)
+            return
+        elif user_input == "Создать отчет":
+            if not is_admin_or_delta(user_id):
+                await update.message.reply_text(f"{user_name}, только администраторы могут создавать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_report_title"] = True
+            await update.message.reply_text(
+                f"{user_name}, введите заголовок отчета (например, 'Отчет за неделю 45 2025'):",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+
+        elif user_input == "Просмотреть отчеты":
+            if not is_admin_or_delta(user_id):
+                await update.message.reply_text(f"{user_name}, только администраторы могут просматривать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            await list_reports_by_title(update, context, action="view")  # Используем новую функцию из кода
+            return
+
+        elif user_input == "Выгрузить отчеты в Excel":
+            if not is_admin_or_delta(user_id):
+                await update.message.reply_text(f"{user_name}, только администраторы могут выгружать отчеты.",
+                                                reply_markup=default_reply_markup)
+                return
+            context.user_data["awaiting_broadcast_export_week"] = True  # Уже есть, но интегрируем
+            await update.message.reply_text(
+                f"{user_name}, введите номер недели и год (например, '45 2025') для выгрузки:",
+                reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True))
+            return
+
+        elif user_input == "Остановить напоминания":
+            if not is_admin_or_delta(user_id):
+                await update.message.reply_text(f"{user_name}, только администраторы могут останавливать напоминания.",
+                                                reply_markup=default_reply_markup)
+                return
+            await stop_reminders(update, context)  # Уже есть в коде
             return
         await show_reports_menu(update, context)
 
@@ -2313,20 +2480,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop("awaiting_delete_delta_id", None)
         except ValueError:
             await update.message.reply_text("Введите корректный ID.")
-        return
-
-    elif user_input == "Добавить delta-админа":
-        if not is_admin_or_delta(user_id):
-            await update.message.reply_text(
-                f"{user_name}, только администраторы могут добавлять delta-админов.",
-                reply_markup=default_reply_markup
-            )
-            return
-        context.user_data["awaiting_delta_admin_id"] = True
-        await update.message.reply_text(
-            f"{user_name}, введите user_id нового delta-админа:",
-            reply_markup=ReplyKeyboardMarkup([['Назад']], resize_keyboard=True)
-        )
         return
 
     # ──────────────────────────────────────────────────────
