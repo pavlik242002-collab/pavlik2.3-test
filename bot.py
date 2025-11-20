@@ -19,7 +19,7 @@ import pandas as pd
 from io import BytesIO
 
 
-# Настройка логирования
+# Настройка логированияатататат
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
